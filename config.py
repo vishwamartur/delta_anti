@@ -108,6 +108,20 @@ API_SERVER_CONFIG = {
 # Webhook secrets
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-secret-key")
 
+# ============ Trade Manager Configuration ============
+INITIAL_ACCOUNT_BALANCE = float(os.getenv("INITIAL_BALANCE", "10000.0"))
+
+TRADE_MANAGER_CONFIG = {
+    'enable_auto_execution': os.getenv("AUTO_EXECUTION", "false").lower() == "true",
+    'enable_trailing_stop': True,
+    'max_risk_per_trade': float(os.getenv("MAX_RISK_PER_TRADE", "0.02")),  # 2%
+    'max_positions': int(os.getenv("MAX_POSITIONS", "5")),
+    'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.05")),  # 5%
+    'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.15")),  # 15%
+    'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "1.5")),  # 1.5%
+    'strategy_name': 'delta_anti_v1'
+}
+
 # Create a config object for easy access
 class Config:
     """Config wrapper for easy attribute access."""

@@ -33,6 +33,22 @@ except ImportError as e:
     print(f"[API] ML modules not available: {e}")
     ML_AVAILABLE = False
 
+# Import Trade API
+try:
+    from api.trade_api import router as trade_router
+    from strategy.advanced_trade_manager import initialize_trade_manager, get_trade_manager
+    import config as cfg
+    
+    # Initialize trade manager
+    initialize_trade_manager(
+        account_balance=cfg.INITIAL_ACCOUNT_BALANCE,
+        trade_config=cfg.TRADE_MANAGER_CONFIG
+    )
+    TRADE_MANAGER_AVAILABLE = True
+except ImportError as e:
+    print(f"[API] Trade manager not available: {e}")
+    TRADE_MANAGER_AVAILABLE = False
+
 
 # ============ Pydantic Models ============
 
@@ -126,6 +142,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include trade API router
+if TRADE_MANAGER_AVAILABLE:
+    app.include_router(trade_router)
 
 # Track startup time and connections
 startup_time = datetime.now()
