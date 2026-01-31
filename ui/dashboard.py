@@ -147,16 +147,25 @@ class Dashboard:
         table.add_column("Duration", justify="right", width=8)
         
         for trade in self._trades:
-            if trade.status != TradeStatus.OPEN:
-                continue
+            # Support both old TradePosition (status) and new Trade (state)
+            if hasattr(trade, 'status'):
+                if trade.status != TradeStatus.OPEN:
+                    continue
+            elif hasattr(trade, 'state'):
+                # New Trade object uses state
+                from strategy.advanced_trade_manager import TradeState
+                if trade.state != TradeState.ACTIVE:
+                    continue
             
-            side_color = "green" if trade.is_long else "red"
+            # Support both side (old) and direction (new)
+            side = getattr(trade, 'side', None) or (trade.direction.value if hasattr(trade, 'direction') else 'LONG')
+            side_color = "green" if 'LONG' in str(side).upper() else "red"
             pnl_color = self._get_pnl_color(trade.pnl_percent)
             current_price = self._prices.get(trade.symbol, trade.entry_price)
             
             table.add_row(
                 trade.symbol,
-                Text(trade.side.upper(), style=f"bold {side_color}"),
+                Text(str(side).upper(), style=f"bold {side_color}"),
                 f"${trade.entry_price:,.2f}",
                 f"${current_price:,.2f}",
                 Text(f"{trade.pnl_percent:+.2f}%", style=f"bold {pnl_color}"),
@@ -165,7 +174,19 @@ class Dashboard:
                 f"{trade.duration_minutes}m"
             )
         
-        if not self._trades or not any(t.status == TradeStatus.OPEN for t in self._trades):
+        # Check for open trades with both status and state
+        has_open = False
+        for t in self._trades:
+            if hasattr(t, 'status') and t.status == TradeStatus.OPEN:
+                has_open = True
+                break
+            elif hasattr(t, 'state'):
+                from strategy.advanced_trade_manager import TradeState
+                if t.state == TradeState.ACTIVE:
+                    has_open = True
+                    break
+        
+        if not self._trades or not has_open:
             table.add_row("---", "No open positions", "---", "---", "---", "---", "---", "---")
         
         return table

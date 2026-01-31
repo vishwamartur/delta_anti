@@ -360,7 +360,7 @@ async def get_indicators(
             'symbol': symbol,
             'price': ind.price,
             'rsi': ind.rsi,
-            'macd': ind.macd,
+            'macd': ind.macd_line,
             'macd_signal': ind.macd_signal,
             'macd_histogram': ind.macd_histogram,
             'bb_upper': ind.bb_upper,
@@ -369,8 +369,8 @@ async def get_indicators(
             'bb_percent': ind.bb_percent,
             'atr': ind.atr,
             'adx': ind.adx,
-            'ema_fast': ind.ema_fast,
-            'ema_slow': ind.ema_slow,
+            'ema_fast': ind.ema_9,
+            'ema_slow': ind.ema_21,
             'trend_strength': ind.trend_strength,
             'timestamp': datetime.now().isoformat()
         }

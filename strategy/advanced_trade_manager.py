@@ -391,7 +391,7 @@ class AdvancedTradeManager:
             ml_confidence=getattr(signal, 'confidence', 0),
             entry_indicators={
                 'rsi': indicators.rsi,
-                'macd': indicators.macd,
+                'macd': indicators.macd_line,
                 'atr': indicators.atr
             },
             strategy_name=self.config.get('strategy_name', 'delta_anti'),
