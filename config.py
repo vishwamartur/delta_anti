@@ -111,32 +111,33 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-secret-key")
 # ============ Trade Manager Configuration ============
 INITIAL_ACCOUNT_BALANCE = float(os.getenv("INITIAL_BALANCE", "10000.0"))
 
-# Delta Exchange Fee Structure
+# Delta Exchange Fee Structure (Futures)
+# Maker: 0.02% | Taker: 0.05%
 TRADING_FEES = {
-    'spread_fee_pct': 0.01,          # 0.01% spread per trade
-    'premium_cap_pct': 3.5,          # 3.5% premium cap charges
     'maker_fee_pct': 0.02,           # 0.02% maker fee
-    'taker_fee_pct': 0.05,           # 0.05% taker fee
-    'total_round_trip_pct': 0.12,    # Total fees for entry + exit
+    'taker_fee_pct': 0.05,           # 0.05% taker fee (market orders)
+    'total_round_trip_pct': 0.10,    # Entry (0.05%) + Exit (0.05%) = 0.10%
 }
 
 # Minimum profit threshold (must exceed fees to be profitable)
-MIN_PROFIT_THRESHOLD_PCT = 0.15  # 0.15% minimum profit after all fees
+MIN_PROFIT_THRESHOLD_PCT = 0.12  # 0.12% minimum profit after all fees
 
 TRADE_MANAGER_CONFIG = {
     'enable_auto_execution': os.getenv("AUTO_EXECUTION", "false").lower() == "true",
     'enable_trailing_stop': True,
     'max_risk_per_trade': float(os.getenv("MAX_RISK_PER_TRADE", "0.02")),  # 2%
-    'max_positions': int(os.getenv("MAX_POSITIONS", "5")),
-    'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.05")),  # 5%
-    'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.15")),  # 15%
+    'max_positions': int(os.getenv("MAX_POSITIONS", "10")),  # Increased to 10
+    'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.10")),  # 10% daily loss
+    'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.50")),  # 50% drawdown (from peak)
     'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "1.5")),  # 1.5%
     'strategy_name': 'delta_anti_v1',
     # Fee structure
-    'spread_fee_pct': TRADING_FEES['spread_fee_pct'],
+    'maker_fee_pct': TRADING_FEES['maker_fee_pct'],
     'taker_fee_pct': TRADING_FEES['taker_fee_pct'],
     'total_fee_pct': TRADING_FEES['total_round_trip_pct'],
-    'min_profit_pct': MIN_PROFIT_THRESHOLD_PCT
+    'min_profit_pct': MIN_PROFIT_THRESHOLD_PCT,
+    # Sync balance from exchange
+    'sync_balance_on_start': True
 }
 
 # Create a config object for easy access

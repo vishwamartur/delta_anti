@@ -330,11 +330,12 @@ class AdvancedTradeManager:
         self.enable_trailing_stop = trade_config.get('enable_trailing_stop', True)
         self.trailing_stop_pct = trade_config.get('trailing_stop_pct', 1.5)
         
-        # Fee structure (Delta Exchange)
-        self.spread_fee_pct = trade_config.get('spread_fee_pct', 0.01)        # 0.01% spread
+        # Fee structure (Delta Exchange Futures)
+        # Maker: 0.02% | Taker: 0.05% (market orders use taker)
+        self.maker_fee_pct = trade_config.get('maker_fee_pct', 0.02)          # 0.02% maker
         self.taker_fee_pct = trade_config.get('taker_fee_pct', 0.05)          # 0.05% taker
-        self.total_fee_pct = trade_config.get('total_fee_pct', 0.12)          # Total round-trip
-        self.min_profit_pct = trade_config.get('min_profit_pct', 0.15)        # Min profit after fees
+        self.total_fee_pct = trade_config.get('total_fee_pct', 0.10)          # Round-trip 0.10%
+        self.min_profit_pct = trade_config.get('min_profit_pct', 0.12)        # Min profit after fees
         
         # Product ID mapping
         self.product_ids = {}
@@ -352,8 +353,39 @@ class AdvancedTradeManager:
         self._load_trades()
         self._load_product_ids()
         
+        # Sync balance from Delta Exchange on startup
+        if trade_config.get('sync_balance_on_start', True):
+            self._sync_balance_on_start()
+        
         logger.info(f"AdvancedTradeManager initialized: auto_execution={self.enable_auto_execution}, "
-                   f"fees={self.total_fee_pct}%, min_profit={self.min_profit_pct}%")
+                   f"balance=${self.risk_manager.account_balance:,.2f}, "
+                   f"fees={self.total_fee_pct}%")
+    
+    def _sync_balance_on_start(self):
+        """Sync account balance from Delta Exchange on startup"""
+        try:
+            response = rest_client.get_wallet_balances()
+            
+            if 'result' not in response:
+                logger.warning(f"[SYNC] Could not sync balance: {response}")
+                return
+            
+            for wallet in response['result']:
+                asset = wallet.get('asset_symbol', wallet.get('asset', ''))
+                balance = float(wallet.get('balance', 0))
+                
+                # Use USD or USDT balance
+                if asset in ('USD', 'USDT', 'INR'):
+                    self.risk_manager.account_balance = balance
+                    self.risk_manager.peak_balance = balance
+                    self.risk_manager.daily_start_balance = balance
+                    logger.info(f"[SYNC] Balance synced from Delta: ${balance:,.2f} {asset}")
+                    return
+            
+            logger.warning("[SYNC] No USD/USDT balance found on Delta Exchange")
+            
+        except Exception as e:
+            logger.error(f"[SYNC] Failed to sync balance: {e}")
     
     def _load_product_ids(self):
         """Load product IDs from Delta Exchange"""
