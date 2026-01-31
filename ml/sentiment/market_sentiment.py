@@ -49,11 +49,22 @@ class SentimentAnalyzer:
         """Initialize FinBERT model if available."""
         if TRANSFORMERS_AVAILABLE:
             try:
+                # Suppress warnings about chat templates (not applicable to FinBERT)
+                import warnings
+                import logging
+                logging.getLogger("transformers").setLevel(logging.ERROR)
+                warnings.filterwarnings("ignore", message=".*chat_templates.*")
+                
                 self.model = pipeline(
                     "sentiment-analysis",
                     model="ProsusAI/finbert",
-                    tokenizer="ProsusAI/finbert"
+                    tokenizer="ProsusAI/finbert",
+                    device=-1  # Use CPU to avoid GPU memory issues
                 )
+                
+                # Restore logging level
+                logging.getLogger("transformers").setLevel(logging.WARNING)
+                
                 print("[ML] FinBERT sentiment model loaded")
             except Exception as e:
                 print(f"[ML] Failed to load FinBERT: {e}")
