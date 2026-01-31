@@ -151,8 +151,8 @@ class Trade:
             return int((end_time - self.entry_time).total_seconds() / 60)
         return 0
     
-    def update_pnl(self, current_price: float):
-        """Update unrealized P&L"""
+    def update_pnl(self, current_price: float, total_fee_pct: float = 0.12):
+        """Update unrealized P&L with fee deduction"""
         self.current_price = current_price
         self.updated_at = datetime.now()
         
@@ -162,19 +162,41 @@ class Trade:
             else:
                 pnl_per_unit = self.entry_price - current_price
             
-            self.unrealized_pnl = pnl_per_unit * self.entry_size
-            self.pnl_percent = (pnl_per_unit / self.entry_price) * 100
+            # Gross P&L
+            gross_pnl = pnl_per_unit * self.entry_size
+            
+            # Calculate fees (spread + taker for entry and exit)
+            trade_value = self.entry_price * self.entry_size
+            estimated_fees = trade_value * (total_fee_pct / 100) * 2  # Entry + exit
+            
+            # Net P&L after fees
+            self.unrealized_pnl = gross_pnl - estimated_fees
+            self.fees_paid = estimated_fees
+            self.pnl_percent = ((gross_pnl - estimated_fees) / trade_value) * 100
     
-    def calculate_realized_pnl(self):
-        """Calculate realized P&L after exit"""
+    def calculate_realized_pnl(self, total_fee_pct: float = 0.12):
+        """Calculate realized P&L after exit with fees"""
         if self.entry_price and self.exit_price and self.exit_size > 0:
             if self.is_long:
                 pnl_per_unit = self.exit_price - self.entry_price
             else:
                 pnl_per_unit = self.entry_price - self.exit_price
             
-            self.realized_pnl = (pnl_per_unit * self.exit_size) - self.fees_paid
-            self.pnl_percent = (pnl_per_unit / self.entry_price) * 100
+            # Gross P&L
+            gross_pnl = pnl_per_unit * self.exit_size
+            
+            # Calculate actual fees (spread + taker for entry and exit)
+            entry_value = self.entry_price * self.exit_size
+            exit_value = self.exit_price * self.exit_size
+            
+            # Fees on both entry and exit
+            entry_fees = entry_value * (total_fee_pct / 100)
+            exit_fees = exit_value * (total_fee_pct / 100)
+            total_fees = entry_fees + exit_fees
+            
+            self.fees_paid = total_fees
+            self.realized_pnl = gross_pnl - total_fees
+            self.pnl_percent = (self.realized_pnl / entry_value) * 100
     
     def to_dict(self) -> Dict:
         """Serialize to dictionary"""
@@ -308,6 +330,12 @@ class AdvancedTradeManager:
         self.enable_trailing_stop = trade_config.get('enable_trailing_stop', True)
         self.trailing_stop_pct = trade_config.get('trailing_stop_pct', 1.5)
         
+        # Fee structure (Delta Exchange)
+        self.spread_fee_pct = trade_config.get('spread_fee_pct', 0.01)        # 0.01% spread
+        self.taker_fee_pct = trade_config.get('taker_fee_pct', 0.05)          # 0.05% taker
+        self.total_fee_pct = trade_config.get('total_fee_pct', 0.12)          # Total round-trip
+        self.min_profit_pct = trade_config.get('min_profit_pct', 0.15)        # Min profit after fees
+        
         # Product ID mapping
         self.product_ids = {}
         
@@ -315,6 +343,7 @@ class AdvancedTradeManager:
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
+        self.total_fees_paid = 0.0
         
         # Persistence
         self.trades_file = Path("data/trades.json")
@@ -323,7 +352,8 @@ class AdvancedTradeManager:
         self._load_trades()
         self._load_product_ids()
         
-        logger.info(f"AdvancedTradeManager initialized: auto_execution={self.enable_auto_execution}")
+        logger.info(f"AdvancedTradeManager initialized: auto_execution={self.enable_auto_execution}, "
+                   f"fees={self.total_fee_pct}%, min_profit={self.min_profit_pct}%")
     
     def _load_product_ids(self):
         """Load product IDs from Delta Exchange"""
@@ -660,13 +690,14 @@ class AdvancedTradeManager:
             return False
     
     def update_trade_pnl(self, trade_id: str, current_price: float):
-        """Update trade P&L with current market price"""
+        """Update trade P&L with current market price (including fees)"""
         
         trade = self.trades.get(trade_id)
         if not trade or trade.state != TradeState.ACTIVE:
             return
         
-        trade.update_pnl(current_price)
+        # Pass fee percentage to P&L calculation
+        trade.update_pnl(current_price, self.total_fee_pct)
         
         # Check trailing stop
         if self.enable_trailing_stop and trade.trailing_stop_pct > 0:
@@ -755,8 +786,11 @@ class AdvancedTradeManager:
         trade.exit_reason = exit_reason
         trade.state = TradeState.CLOSED
         
-        # Calculate realized P&L
-        trade.calculate_realized_pnl()
+        # Calculate realized P&L with fees
+        trade.calculate_realized_pnl(self.total_fee_pct)
+        
+        # Track total fees
+        self.total_fees_paid += trade.fees_paid
         
         # Update risk manager
         self.risk_manager.update_daily_pnl(trade.realized_pnl)

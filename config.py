@@ -111,6 +111,18 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-secret-key")
 # ============ Trade Manager Configuration ============
 INITIAL_ACCOUNT_BALANCE = float(os.getenv("INITIAL_BALANCE", "10000.0"))
 
+# Delta Exchange Fee Structure
+TRADING_FEES = {
+    'spread_fee_pct': 0.01,          # 0.01% spread per trade
+    'premium_cap_pct': 3.5,          # 3.5% premium cap charges
+    'maker_fee_pct': 0.02,           # 0.02% maker fee
+    'taker_fee_pct': 0.05,           # 0.05% taker fee
+    'total_round_trip_pct': 0.12,    # Total fees for entry + exit
+}
+
+# Minimum profit threshold (must exceed fees to be profitable)
+MIN_PROFIT_THRESHOLD_PCT = 0.15  # 0.15% minimum profit after all fees
+
 TRADE_MANAGER_CONFIG = {
     'enable_auto_execution': os.getenv("AUTO_EXECUTION", "false").lower() == "true",
     'enable_trailing_stop': True,
@@ -119,7 +131,12 @@ TRADE_MANAGER_CONFIG = {
     'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.05")),  # 5%
     'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.15")),  # 15%
     'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "1.5")),  # 1.5%
-    'strategy_name': 'delta_anti_v1'
+    'strategy_name': 'delta_anti_v1',
+    # Fee structure
+    'spread_fee_pct': TRADING_FEES['spread_fee_pct'],
+    'taker_fee_pct': TRADING_FEES['taker_fee_pct'],
+    'total_fee_pct': TRADING_FEES['total_round_trip_pct'],
+    'min_profit_pct': MIN_PROFIT_THRESHOLD_PCT
 }
 
 # Create a config object for easy access
