@@ -4,8 +4,14 @@ All high-frequency trading parameters
 """
 import os
 
+# Live trading mode
+LIVE_TRADING_ENABLED = os.getenv("AUTO_EXECUTION", "false").lower() == "true"
+
 # Load from environment or use defaults
 HFT_CONFIG = {
+    # Trading Mode
+    'enable_live_trading': LIVE_TRADING_ENABLED,  # True = REAL orders
+    
     # Network
     'exchange_url': os.getenv('DELTA_WS_URL', 'wss://api.delta.exchange/v2/ws'),
     'enable_binary_protocol': False,  # Delta uses JSON
