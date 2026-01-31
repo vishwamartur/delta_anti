@@ -1,0 +1,23 @@
+# Delta Exchange Trading System Dependencies
+
+# HTTP requests
+requests>=2.31.0
+
+# WebSocket client
+websocket-client>=1.7.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Technical analysis
+ta>=0.11.0
+
+# Rich console output
+rich>=13.7.0
+
+# Async support
+asyncio-throttle>=1.0.2
