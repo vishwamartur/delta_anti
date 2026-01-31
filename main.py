@@ -221,7 +221,7 @@ class TradingSystem:
     def start(self):
         """Start the trading system."""
         print("=" * 60)
-        print("🚀 DELTA EXCHANGE TRADING SYSTEM")
+        print("DELTA EXCHANGE TRADING SYSTEM")
         print("=" * 60)
         print(f"Symbols: {', '.join(self.symbols)}")
         print(f"Timeframe: {self.timeframe}")

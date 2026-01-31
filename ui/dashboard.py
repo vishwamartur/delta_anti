@@ -60,13 +60,13 @@ class Dashboard:
         """Create header panel."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         header_text = Text()
-        header_text.append("🚀 DELTA EXCHANGE TRADING SYSTEM", style="bold cyan")
+        header_text.append("DELTA EXCHANGE TRADING SYSTEM", style="bold cyan")
         header_text.append(f"  |  {now}", style="dim")
         return Panel(header_text, style="bold blue")
     
     def _create_prices_table(self) -> Table:
         """Create market prices table."""
-        table = Table(title="📊 Market Prices", box=box.ROUNDED, show_header=True)
+        table = Table(title="[PRICES]", box=box.ROUNDED, show_header=True)
         table.add_column("Symbol", style="cyan", width=12)
         table.add_column("Price", justify="right", style="white", width=12)
         table.add_column("Trend", justify="center", width=12)
@@ -84,16 +84,16 @@ class Dashboard:
             rsi_style = "green" if ind.rsi < 30 else "red" if ind.rsi > 70 else "white"
             
             # MACD signal
-            macd_signal = "🟢 BUY" if ind.macd_histogram > 0 else "🔴 SELL"
+            macd_signal = "[+] BUY" if ind.macd_histogram > 0 else "[-] SELL"
             
             # Trend indicator
             trend_style = "green" if "up" in ind.trend_strength else "red" if "down" in ind.trend_strength else "yellow"
-            trend_emoji = "📈" if "up" in ind.trend_strength else "📉" if "down" in ind.trend_strength else "➡️"
+            trend_text = "UP" if "up" in ind.trend_strength else "DN" if "down" in ind.trend_strength else "--"
             
             table.add_row(
                 symbol,
                 f"${ind.price:,.2f}",
-                Text(f"{trend_emoji} {ind.trend_strength.upper()}", style=trend_style),
+                Text(f"[{trend_text}] {ind.trend_strength.upper()}", style=trend_style),
                 Text(f"{ind.rsi:.1f}", style=rsi_style),
                 macd_signal,
                 f"{ind.bb_percent:.2f}"
@@ -103,7 +103,7 @@ class Dashboard:
     
     def _create_signals_table(self) -> Table:
         """Create trading signals table."""
-        table = Table(title="📡 Trade Signals", box=box.ROUNDED, show_header=True)
+        table = Table(title="[SIGNALS]", box=box.ROUNDED, show_header=True)
         table.add_column("Symbol", style="cyan", width=10)
         table.add_column("Signal", justify="center", width=12)
         table.add_column("Confidence", justify="right", width=10)
@@ -117,11 +117,11 @@ class Dashboard:
                 continue
             
             color = self._get_signal_color(signal)
-            strength_emoji = "🔥" if signal.strength == SignalStrength.STRONG else "⚡" if signal.strength == SignalStrength.MODERATE else "💫"
+            strength_mark = "***" if signal.strength == SignalStrength.STRONG else "**" if signal.strength == SignalStrength.MODERATE else "*"
             
             table.add_row(
                 symbol,
-                Text(f"{strength_emoji} {signal.signal_type.value}", style=f"bold {color}"),
+                Text(f"{strength_mark} {signal.signal_type.value}", style=f"bold {color}"),
                 Text(f"{signal.confidence}%", style=color),
                 f"${signal.entry_price:,.2f}",
                 f"${signal.stop_loss:,.2f}",
@@ -136,7 +136,7 @@ class Dashboard:
     
     def _create_positions_table(self) -> Table:
         """Create open positions table."""
-        table = Table(title="💼 Open Positions", box=box.ROUNDED, show_header=True)
+        table = Table(title="[POSITIONS]", box=box.ROUNDED, show_header=True)
         table.add_column("Symbol", style="cyan", width=10)
         table.add_column("Side", justify="center", width=8)
         table.add_column("Entry", justify="right", width=12)
@@ -189,7 +189,7 @@ class Dashboard:
         content.append("Total Trades: ", style="dim")
         content.append(f"{stats.get('total_trades', 0)}\n", style="cyan")
         
-        return Panel(content, title="📊 Stats", box=box.ROUNDED)
+        return Panel(content, title="[STATS]", box=box.ROUNDED)
     
     def _create_signal_details_panel(self) -> Panel:
         """Create panel with signal reasoning."""
@@ -208,7 +208,7 @@ class Dashboard:
         if not content.plain:
             content.append("Waiting for signals...", style="dim")
         
-        return Panel(content, title="💡 Signal Analysis", box=box.ROUNDED)
+        return Panel(content, title="[ANALYSIS]", box=box.ROUNDED)
     
     def _create_messages_panel(self) -> Panel:
         """Create system messages panel."""
@@ -220,7 +220,7 @@ class Dashboard:
         if not self._messages:
             content.append("System ready...", style="dim")
         
-        return Panel(content, title="📢 Messages", box=box.ROUNDED)
+        return Panel(content, title="[MESSAGES]", box=box.ROUNDED)
     
     def update(self, 
                prices: Dict[str, float] = None,
@@ -320,7 +320,7 @@ class Dashboard:
             f"Entry: ${signal.entry_price:,.2f} | SL: ${signal.stop_loss:,.2f} | TP: ${signal.take_profit:,.2f}\n"
             f"Confidence: {signal.confidence}% | R:R {signal.risk_reward_ratio:.1f}\n"
             f"Reasons: {', '.join(signal.reasons[:3])}",
-            title=f"🚨 TRADE SIGNAL",
+            title="!! TRADE SIGNAL !!",
             border_style=color
         ))
     
@@ -334,7 +334,7 @@ class Dashboard:
             f"Entry: ${trade.entry_price:,.2f} → Exit: ${trade.exit_price or 0:,.2f}\n"
             f"[{pnl_color}]P&L: {trade.pnl_percent:+.2f}%[/]\n"
             f"Reason: {reason}",
-            title=f"🔔 EXIT SIGNAL",
+            title="!! EXIT SIGNAL !!",
             border_style="yellow"
         ))
 
