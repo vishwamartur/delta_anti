@@ -72,3 +72,59 @@ SIGNAL_CONFIG = {
 # Display Settings
 REFRESH_RATE = 1  # Seconds between dashboard updates
 CANDLE_HISTORY_SIZE = 100  # Number of candles to keep in memory
+
+# ============ ML Configuration ============
+ML_CONFIG = {
+    "lstm": {
+        "sequence_length": 60,
+        "prediction_steps": 5,
+        "hidden_size": 128,
+        "num_layers": 2,
+        "dropout": 0.2
+    },
+    "dqn": {
+        "state_size": 50,
+        "hidden_size": 256,
+        "learning_rate": 0.001,
+        "gamma": 0.95,
+        "epsilon": 1.0,
+        "epsilon_min": 0.01,
+        "epsilon_decay": 0.995,
+        "buffer_size": 10000
+    },
+    "sentiment": {
+        "cache_duration_minutes": 15,
+        "news_limit": 50
+    }
+}
+
+# ============ API Server Configuration ============
+API_SERVER_CONFIG = {
+    "host": os.getenv("API_HOST", "0.0.0.0"),
+    "port": int(os.getenv("API_PORT", "8000")),
+    "debug": os.getenv("API_DEBUG", "false").lower() == "true"
+}
+
+# Webhook secrets
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-secret-key")
+
+# Create a config object for easy access
+class Config:
+    """Config wrapper for easy attribute access."""
+    API_KEY = API_KEY
+    API_SECRET = API_SECRET
+    REST_URL = REST_URL
+    WS_URL = WS_URL
+    TRADING_SYMBOLS = TRADING_SYMBOLS
+    DEFAULT_TIMEFRAME = DEFAULT_TIMEFRAME
+    RISK_PER_TRADE = RISK_PER_TRADE
+    MAX_POSITION_SIZE = MAX_POSITION_SIZE
+    MAX_DAILY_TRADES = MAX_DAILY_TRADES
+    INDICATOR_CONFIG = INDICATOR_CONFIG
+    SIGNAL_CONFIG = SIGNAL_CONFIG
+    ML_CONFIG = ML_CONFIG
+    API_SERVER_CONFIG = API_SERVER_CONFIG
+
+
+config = Config()
+

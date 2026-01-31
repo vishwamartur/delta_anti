@@ -1,23 +1,41 @@
 # Delta Exchange Real-Time Trading System
 
-A Python-based quantitative trading system for Delta Exchange that streams real-time market data, performs technical analysis, and provides trade entry/exit signals.
+A Python-based quantitative trading system for Delta Exchange with **ML-powered predictions** and **REST API server**.
 
-## Features
+## ✨ Features
 
+### Core Trading
 - **Real-Time Data**: WebSocket streaming of OHLC candles and tickers
-- **10+ Technical Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
-- **Trade Signals**: Long/Short entry with confidence scores (0-100)
-- **Exit Tracking**: Dynamic TP/SL levels based on ATR
-- **Risk Management**: Position sizing and trade limits
-- **Console Dashboard**: Real-time display of all trading data
+- **Technical Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
+- **Trade Signals**: Long/Short entry with confidence scores
+- **Risk Management**: Dynamic TP/SL based on ATR
 
-## Installation
+### 🤖 ML Layer (v2.0)
+- **LSTM Price Predictor**: Bidirectional LSTM with attention mechanism
+- **Sentiment Analysis**: FinBERT-powered news sentiment scoring
+- **DQN Trading Agent**: Reinforcement learning for trade decisions
+- **Feature Engineering**: 100+ features from OHLCV data
+
+### 🌐 REST API (v2.0)
+- **FastAPI Server**: Production-ready REST endpoints
+- **WebSocket Streaming**: Real-time predictions
+- **Webhooks**: TradingView & Telegram integration
+
+## 📦 Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/vishwamartur/delta_anti.git
+cd delta_anti
+
+# Install dependencies
 pip install -r requirements.txt
+
+# For ML features (optional, requires more dependencies)
+pip install torch transformers scikit-learn
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 1. Copy `.env.example` to `.env`
 2. Add your Delta Exchange API credentials:
@@ -26,59 +44,86 @@ pip install -r requirements.txt
    DELTA_API_SECRET=your_api_secret
    ```
 
-> ⚠️ **Important**: Ensure your IP is whitelisted on Delta Exchange for API trading access.
+> ⚠️ Ensure your IP is whitelisted on Delta Exchange for API access.
 
-## Usage
+## 🚀 Usage
 
+### Console Dashboard
 ```bash
 python main.py
 ```
 
-This will launch the real-time dashboard showing:
-- Live market prices with trend indicators
-- Trade signals (LONG/SHORT) with entry, SL, and TP levels
-- Open positions with P&L tracking
-- Technical indicator values
+### API Server
+```bash
+python -m api.server.main
+```
+Server runs at `http://localhost:8000`
+- Docs: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
-Press `Ctrl+C` to stop.
+### API Endpoints
 
-## Project Structure
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v2/predict` | POST | Get ML price predictions |
+| `/api/v2/signals/{symbol}` | GET | Get combined trading signals |
+| `/api/v2/sentiment/{symbol}` | GET | Get sentiment analysis |
+| `/api/v2/indicators/{symbol}` | GET | Get technical indicators |
+| `/api/v2/trades` | GET | Get open trades |
+| `/ws/predictions/{symbol}` | WebSocket | Stream predictions |
+
+## 📁 Project Structure
 
 ```
-deltaanti/
-├── .env                      # API credentials (not tracked)
-├── config.py                 # Configuration settings
-├── main.py                   # Application entry point
-├── requirements.txt          # Python dependencies
+delta_anti/
+├── config.py                 # Configuration
+├── main.py                   # Console dashboard entry
+├── requirements.txt          # Dependencies
+│
 ├── api/
 │   ├── delta_rest.py        # REST API client
-│   └── delta_websocket.py   # WebSocket client
+│   ├── delta_websocket.py   # WebSocket client
+│   ├── server/              # FastAPI server
+│   │   └── main.py
+│   └── webhooks/            # Webhook handlers
+│       └── tradingview.py
+│
+├── ml/                       # Machine Learning
+│   ├── models/
+│   │   └── lstm_predictor.py
+│   ├── features/
+│   │   └── feature_engineer.py
+│   ├── sentiment/
+│   │   └── market_sentiment.py
+│   └── agents/
+│       └── dqn_trader.py
+│
 ├── data/
-│   └── market_data.py       # Candle data management
+│   └── market_data.py
 ├── analysis/
-│   ├── indicators.py        # Technical indicators
-│   └── signals.py           # Signal generation
+│   ├── indicators.py
+│   └── signals.py
 ├── strategy/
-│   └── trade_manager.py     # Trade tracking
+│   └── trade_manager.py
 └── ui/
-    └── dashboard.py         # Console display
+    └── dashboard.py
 ```
 
-## Technical Indicators
+## 📊 Technical Indicators
 
 | Indicator | Description |
 |-----------|-------------|
 | RSI | Relative Strength Index (14-period) |
 | MACD | Moving Average Convergence Divergence |
 | Bollinger Bands | 20-period with 2 std dev |
-| ATR | Average True Range for volatility |
-| ADX | Average Directional Index for trend strength |
-| EMA/SMA | Exponential and Simple Moving Averages |
+| ATR | Average True Range |
+| ADX | Average Directional Index |
+| EMA/SMA | Exponential & Simple Moving Averages |
 
-## API Documentation
+## 🔗 API Documentation
 
-Refer to the [Delta Exchange API Docs](https://docs.delta.exchange/) for more details.
+- [Delta Exchange API Docs](https://docs.delta.exchange/)
 
-## License
+## 📄 License
 
 MIT

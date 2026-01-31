@@ -226,6 +226,10 @@ class MarketDataManager:
         """Get number of candles stored for symbol."""
         return len(self._candles.get(symbol, []))
     
+    def has_data(self, symbol: str) -> bool:
+        """Check if we have data for a symbol."""
+        return symbol in self._candles and len(self._candles[symbol]) > 0
+    
     @property
     def symbols(self) -> List[str]:
         """Get list of all symbols with data."""
