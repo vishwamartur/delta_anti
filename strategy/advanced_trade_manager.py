@@ -425,13 +425,20 @@ class AdvancedTradeManager:
             side = "buy" if trade.is_long else "sell"
             product_id = self.product_ids.get(trade.symbol, 139)
             
+            # Ensure size is at least 1 contract
+            order_size = max(1, int(trade.entry_size))
+            
+            logger.info(f"[LIVE] Placing {side.upper()} order: {trade.symbol} x{order_size}")
+            
             # Place market order for entry
             response = rest_client.place_order(
                 symbol=trade.symbol,
                 side=side,
-                size=int(trade.entry_size),
+                size=order_size,
                 order_type="market_order"
             )
+            
+            logger.info(f"[LIVE] Order response: {response}")
             
             if response.get('success') or response.get('result'):
                 order_data = response.get('result', {})
@@ -443,26 +450,45 @@ class AdvancedTradeManager:
                     symbol=trade.symbol,
                     side=side,
                     order_type='market',
-                    size=trade.entry_size,
-                    status='open'
+                    size=order_size,
+                    status='filled'  # Market orders fill immediately
                 )
                 
-                trade.state = TradeState.CREATED
-                trade.created_at = datetime.now()
+                # Get fill price from response or use entry price
+                fill_price = order_data.get('fill_price') or order_data.get('average_fill_price')
+                if fill_price:
+                    trade.entry_price = float(fill_price)
+                    trade.entry_order.average_fill_price = float(fill_price)
+                
+                # ACTIVATE THE TRADE
+                trade.entry_time = datetime.now()
+                trade.entry_size = order_size
+                trade.state = TradeState.ACTIVE
+                trade.current_price = trade.entry_price
+                
+                # Add to open trades
+                self.open_trades[trade.trade_id] = trade
                 
                 self._save_trades()
                 
-                logger.info(f"Order placed: {trade.trade_id}, OrderID={trade.entry_order.order_id}")
+                logger.info(f"[LIVE] Trade ACTIVATED: {trade.trade_id}, "
+                           f"OrderID={trade.entry_order.order_id}, "
+                           f"Fill=${trade.entry_price:.2f}")
                 return True
             else:
-                error_msg = response.get('error', 'Unknown error')
-                logger.error(f"Order placement failed: {error_msg}")
+                error_msg = response.get('error', response)
+                logger.error(f"[LIVE] Order placement FAILED: {error_msg}")
                 trade.state = TradeState.REJECTED
+                trade.notes = f"Order rejected: {error_msg}"
+                self._save_trades()
                 return False
                 
         except Exception as e:
-            logger.error(f"Exception executing trade: {e}")
+            logger.error(f"[LIVE] Exception executing trade: {e}")
+            import traceback
+            traceback.print_exc()
             trade.state = TradeState.REJECTED
+            trade.notes = f"Exception: {str(e)}"
             return False
     
     def update_trade_pnl(self, trade_id: str, current_price: float):
@@ -595,14 +621,19 @@ class AdvancedTradeManager:
         try:
             # Opposite side for exit
             side = "sell" if trade.is_long else "buy"
+            order_size = max(1, int(trade.entry_size))
+            
+            logger.info(f"[LIVE] Placing EXIT {side.upper()} order: {trade.symbol} x{order_size}")
             
             response = rest_client.place_order(
                 symbol=trade.symbol,
                 side=side,
-                size=int(trade.entry_size),
+                size=order_size,
                 order_type="market_order",
                 reduce_only=True
             )
+            
+            logger.info(f"[LIVE] Exit order response: {response}")
             
             if response.get('success') or response.get('result'):
                 order_data = response.get('result', {})
@@ -612,17 +643,27 @@ class AdvancedTradeManager:
                     symbol=trade.symbol,
                     side=side,
                     order_type='market',
-                    size=trade.entry_size,
-                    status='open'
+                    size=order_size,
+                    status='filled'
                 )
                 
+                # Get exit fill price
+                fill_price = order_data.get('fill_price') or order_data.get('average_fill_price')
+                if fill_price:
+                    trade.exit_price = float(fill_price)
+                    trade.exit_order.average_fill_price = float(fill_price)
+                
+                logger.info(f"[LIVE] Exit order FILLED: {trade.trade_id}, Price=${trade.exit_price:.2f}")
                 return True
             else:
-                logger.error(f"Exit order failed: {response.get('error')}")
+                error_msg = response.get('error', response)
+                logger.error(f"[LIVE] Exit order FAILED: {error_msg}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Exception placing exit order: {e}")
+            logger.error(f"[LIVE] Exception placing exit order: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def close_all_for_symbol(self, symbol: str, exit_price: float) -> int:
