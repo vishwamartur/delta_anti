@@ -341,6 +341,174 @@ class AdvancedTradeManager:
             # Fallback mapping
             self.product_ids = {"BTCUSD": 139, "ETHUSD": 132}
     
+    def sync_positions(self) -> Dict:
+        """
+        Sync internal state with actual Delta Exchange positions.
+        Returns current positions from exchange.
+        """
+        try:
+            response = rest_client.get_positions()
+            
+            if 'result' not in response:
+                logger.warning(f"[SYNC] No positions data: {response}")
+                return {}
+            
+            positions = response['result']
+            live_positions = {}
+            
+            for pos in positions:
+                symbol = pos.get('product', {}).get('symbol', pos.get('product_symbol', ''))
+                size = float(pos.get('size', 0))
+                
+                if size == 0:
+                    continue
+                
+                entry_price = float(pos.get('entry_price', 0))
+                mark_price = float(pos.get('mark_price', 0))
+                unrealized_pnl = float(pos.get('unrealized_pnl', 0))
+                realized_pnl = float(pos.get('realized_pnl', 0))
+                margin = float(pos.get('margin', 0))
+                liquidation_price = float(pos.get('liquidation_price', 0) or 0)
+                
+                direction = 'LONG' if size > 0 else 'SHORT'
+                
+                live_positions[symbol] = {
+                    'symbol': symbol,
+                    'size': abs(size),
+                    'direction': direction,
+                    'entry_price': entry_price,
+                    'mark_price': mark_price,
+                    'unrealized_pnl': unrealized_pnl,
+                    'realized_pnl': realized_pnl,
+                    'margin': margin,
+                    'liquidation_price': liquidation_price,
+                    'pnl_percent': (unrealized_pnl / margin * 100) if margin > 0 else 0
+                }
+                
+                logger.info(f"[SYNC] {symbol}: {direction} x{abs(size):.4f} @ ${entry_price:.2f}, "
+                           f"P&L: ${unrealized_pnl:.2f} ({live_positions[symbol]['pnl_percent']:.2f}%)")
+            
+            # Sync with internal trades
+            self._sync_with_live_positions(live_positions)
+            
+            return live_positions
+            
+        except Exception as e:
+            logger.error(f"[SYNC] Failed to sync positions: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+    
+    def _sync_with_live_positions(self, live_positions: Dict):
+        """Sync internal trade tracking with live positions"""
+        
+        # Update existing trades with live data
+        for trade_id, trade in list(self.open_trades.items()):
+            if trade.symbol in live_positions:
+                pos = live_positions[trade.symbol]
+                trade.current_price = pos['mark_price']
+                trade.unrealized_pnl = pos['unrealized_pnl']
+                trade.pnl_percent = pos['pnl_percent']
+                trade.updated_at = datetime.now()
+            else:
+                # Position closed externally
+                logger.warning(f"[SYNC] Trade {trade_id} not found on exchange - marking closed")
+                trade.state = TradeState.CLOSED
+                trade.exit_reason = ExitReason.MANUAL
+                trade.exit_time = datetime.now()
+                del self.open_trades[trade_id]
+                self.trade_history.insert(0, trade)
+        
+        # Check for positions not in our tracking
+        for symbol, pos in live_positions.items():
+            has_trade = any(t.symbol == symbol for t in self.open_trades.values())
+            if not has_trade:
+                logger.info(f"[SYNC] Found untracked position: {symbol} - creating trade")
+                # Create trade from live position
+                trade_id = f"EXT{int(datetime.now().timestamp() * 1000)}"
+                direction = TradeDirection.LONG if pos['direction'] == 'LONG' else TradeDirection.SHORT
+                
+                trade = Trade(
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    direction=direction,
+                    entry_price=pos['entry_price'],
+                    entry_size=pos['size'],
+                    entry_time=datetime.now(),
+                    current_price=pos['mark_price'],
+                    unrealized_pnl=pos['unrealized_pnl'],
+                    pnl_percent=pos['pnl_percent'],
+                    state=TradeState.ACTIVE,
+                    strategy_name='external',
+                    notes='Synced from exchange'
+                )
+                
+                self.trades[trade_id] = trade
+                self.open_trades[trade_id] = trade
+        
+        self._save_trades()
+    
+    def sync_balance(self) -> Dict:
+        """
+        Sync account balance from Delta Exchange.
+        Returns wallet balances.
+        """
+        try:
+            response = rest_client.get_wallet_balances()
+            
+            if 'result' not in response:
+                logger.warning(f"[SYNC] No balance data: {response}")
+                return {}
+            
+            balances = {}
+            for wallet in response['result']:
+                asset = wallet.get('asset_symbol', wallet.get('asset', 'USD'))
+                balance = float(wallet.get('balance', 0))
+                available = float(wallet.get('available_balance', balance))
+                
+                balances[asset] = {
+                    'total': balance,
+                    'available': available,
+                    'margin_used': balance - available
+                }
+                
+                # Update risk manager if USD
+                if asset == 'USD' or asset == 'USDT':
+                    self.risk_manager.account_balance = balance
+                    if balance > self.risk_manager.peak_balance:
+                        self.risk_manager.peak_balance = balance
+            
+            logger.info(f"[SYNC] Balance synced: {balances}")
+            return balances
+            
+        except Exception as e:
+            logger.error(f"[SYNC] Failed to sync balance: {e}")
+            return {}
+    
+    def get_live_positions(self) -> List[Dict]:
+        """Get list of current live positions from exchange"""
+        positions = self.sync_positions()
+        return list(positions.values())
+    
+    def get_account_summary(self) -> Dict:
+        """Get full account summary with positions and balance"""
+        balances = self.sync_balance()
+        positions = self.sync_positions()
+        
+        total_unrealized = sum(p.get('unrealized_pnl', 0) for p in positions.values())
+        total_margin = sum(p.get('margin', 0) for p in positions.values())
+        
+        return {
+            'balances': balances,
+            'positions': list(positions.values()),
+            'position_count': len(positions),
+            'total_unrealized_pnl': total_unrealized,
+            'total_margin_used': total_margin,
+            'open_trades': len(self.open_trades),
+            'daily_pnl': self.risk_manager.daily_pnl,
+            'account_balance': self.risk_manager.account_balance
+        }
+    
     def create_trade_from_signal(self, signal, indicators: IndicatorValues) -> Optional[Trade]:
         """Create trade from signal generator output"""
         

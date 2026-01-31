@@ -168,7 +168,15 @@ class IntegratedTradingSystem:
             print("[SYSTEM] WebSocket failed - Running in REST-only mode")
     
     def _update_dashboard(self):
-        """Update dashboard with latest data."""
+        """Update dashboard with latest data and sync with exchange."""
+        # Sync positions from Delta Exchange (real-time)
+        try:
+            if hasattr(self.trade_manager, 'sync_positions'):
+                self.trade_manager.sync_positions()
+                self.trade_manager.sync_balance()
+        except Exception as e:
+            logger.debug(f"Sync error: {e}")
+        
         prices = {}
         for symbol in self.symbols:
             price = market_data.get_latest_price(symbol)

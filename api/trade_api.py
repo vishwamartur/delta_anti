@@ -168,3 +168,59 @@ async def get_risk_config():
         "daily_pnl": rm.daily_pnl,
         "current_drawdown": rm.current_drawdown
     }
+
+
+@router.get("/positions/live", response_model=Dict)
+async def get_live_positions():
+    """Get live positions from Delta Exchange (real-time sync)"""
+    tm = get_trade_manager()
+    if not tm:
+        raise HTTPException(status_code=503, detail="Trade manager not initialized")
+    
+    positions = tm.get_live_positions()
+    return {
+        "positions": positions,
+        "count": len(positions),
+        "synced": True
+    }
+
+
+@router.get("/account/summary", response_model=Dict)
+async def get_account_summary():
+    """Get full account summary with balances and positions"""
+    tm = get_trade_manager()
+    if not tm:
+        raise HTTPException(status_code=503, detail="Trade manager not initialized")
+    
+    return tm.get_account_summary()
+
+
+@router.post("/sync", response_model=Dict)
+async def sync_with_exchange():
+    """Manually trigger sync with Delta Exchange"""
+    tm = get_trade_manager()
+    if not tm:
+        raise HTTPException(status_code=503, detail="Trade manager not initialized")
+    
+    positions = tm.sync_positions()
+    balances = tm.sync_balance()
+    
+    return {
+        "status": "success",
+        "positions_synced": len(positions),
+        "balances": balances
+    }
+
+
+@router.get("/balance", response_model=Dict)
+async def get_balance():
+    """Get current wallet balance from Delta Exchange"""
+    tm = get_trade_manager()
+    if not tm:
+        raise HTTPException(status_code=503, detail="Trade manager not initialized")
+    
+    balances = tm.sync_balance()
+    return {
+        "balances": balances,
+        "account_balance": tm.risk_manager.account_balance
+    }
