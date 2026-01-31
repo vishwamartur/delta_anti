@@ -932,8 +932,94 @@ class AdvancedTradeManager:
         """Check if there's an open position for symbol"""
         return self.get_open_trade(symbol) is not None
     
+    def sync_trade_stats(self) -> Dict:
+        """
+        Sync trade statistics from Delta Exchange fills/history.
+        Fetches real trades from the exchange.
+        """
+        try:
+            import time
+            from datetime import datetime, timedelta
+            
+            # Get today's start timestamp
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start_ts = int(today_start.timestamp())
+            
+            # Fetch fills from Delta Exchange
+            response = rest_client.get_fills(page_size=100)
+            
+            if 'result' not in response:
+                logger.warning(f"[SYNC] No fills data: {response}")
+                return {}
+            
+            fills = response.get('result', [])
+            
+            # Calculate statistics
+            total_trades = 0
+            winning_trades = 0
+            losing_trades = 0
+            daily_pnl = 0.0
+            total_pnl = 0.0
+            total_fees = 0.0
+            
+            # Group fills by order to calculate P&L per trade
+            for fill in fills:
+                fill_pnl = float(fill.get('realized_pnl', 0))
+                fill_fee = float(fill.get('commission', 0))
+                fill_time = fill.get('created_at', '')
+                
+                total_pnl += fill_pnl
+                total_fees += fill_fee
+                
+                # Check if it's a closing fill (has realized P&L)
+                if fill_pnl != 0:
+                    total_trades += 1
+                    net_pnl = fill_pnl - fill_fee
+                    
+                    if net_pnl > 0:
+                        winning_trades += 1
+                    else:
+                        losing_trades += 1
+                    
+                    # Check if today's trade
+                    try:
+                        fill_ts = int(datetime.fromisoformat(fill_time.replace('Z', '+00:00')).timestamp())
+                        if fill_ts >= today_start_ts:
+                            daily_pnl += net_pnl
+                    except:
+                        pass
+            
+            # Update internal counters with exchange data
+            if total_trades > 0:
+                self.total_trades = total_trades
+                self.winning_trades = winning_trades
+                self.losing_trades = losing_trades
+                self.risk_manager.daily_pnl = daily_pnl
+                self.total_fees_paid = total_fees
+            
+            logger.info(f"[SYNC] Stats from Delta: {total_trades} trades, "
+                       f"W:{winning_trades} L:{losing_trades}, Daily P&L: ${daily_pnl:.2f}")
+            
+            return {
+                'total_trades': total_trades,
+                'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
+                'total_pnl': total_pnl,
+                'daily_pnl': daily_pnl,
+                'total_fees': total_fees
+            }
+            
+        except Exception as e:
+            logger.error(f"[SYNC] Failed to sync trade stats: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+    
     def get_statistics(self) -> Dict:
-        """Get trading statistics"""
+        """Get trading statistics (syncs from Delta Exchange)"""
+        
+        # Sync from exchange first
+        self.sync_trade_stats()
         
         win_rate = (self.winning_trades / self.total_trades * 100 
                    if self.total_trades > 0 else 0)
@@ -949,7 +1035,8 @@ class AdvancedTradeManager:
             'total_pnl': round(total_pnl, 2),
             'daily_pnl': round(self.risk_manager.daily_pnl, 2),
             'account_balance': round(self.risk_manager.account_balance, 2),
-            'max_drawdown': round(self.risk_manager.current_drawdown, 2)
+            'max_drawdown': round(self.risk_manager.current_drawdown, 2),
+            'total_fees_paid': round(self.total_fees_paid, 2)
         }
     
     def _save_trades(self):
