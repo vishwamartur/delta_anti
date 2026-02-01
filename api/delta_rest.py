@@ -238,6 +238,131 @@ class DeltaRestClient:
         if end_time:
             params['end_time'] = end_time
         return self._request('GET', '/v2/fills', params=params, authenticated=True)
+    
+    # ========== Leverage Management ==========
+    
+    def set_leverage(self, product_id: int, leverage: int = None) -> Dict:
+        """
+        Set leverage for a product.
+        
+        Args:
+            product_id: The product ID (not symbol)
+            leverage: Leverage amount (default: uses DEFAULT_LEVERAGE from config, which is 200x)
+        
+        Returns:
+            API response with leverage, order_margin, and product_id
+        """
+        if leverage is None:
+            leverage = config.DEFAULT_LEVERAGE
+        
+        data = {"leverage": leverage}
+        return self._request(
+            'POST', 
+            f'/v2/products/{product_id}/orders/leverage', 
+            data=data, 
+            authenticated=True
+        )
+    
+    def get_leverage(self, product_id: int) -> Dict:
+        """
+        Get current leverage for a product.
+        
+        Args:
+            product_id: The product ID (not symbol)
+        
+        Returns:
+            API response with current leverage settings
+        """
+        return self._request(
+            'GET', 
+            f'/v2/products/{product_id}/orders/leverage', 
+            authenticated=True
+        )
+    
+    def get_product_id(self, symbol: str) -> Optional[int]:
+        """
+        Get product ID from symbol.
+        
+        Args:
+            symbol: Product symbol (e.g., 'BTCUSD')
+            
+        Returns:
+            Product ID or None if not found
+        """
+        result = self.get_product(symbol)
+        if 'result' in result and result['result']:
+            return result['result'].get('id')
+        return None
+    
+    def set_leverage_by_symbol(self, symbol: str, leverage: int = None) -> Dict:
+        """
+        Convenience method to set leverage using symbol instead of product ID.
+        
+        Args:
+            symbol: Product symbol (e.g., 'BTCUSD')
+            leverage: Leverage amount (default: 200x from config)
+            
+        Returns:
+            API response or error
+        """
+        product_id = self.get_product_id(symbol)
+        if product_id is None:
+            return {"error": f"Could not find product ID for symbol: {symbol}"}
+        return self.set_leverage(product_id, leverage)
+    
+    # ========== Auto Topup (Liquidation Prevention) ==========
+    
+    def set_auto_topup(self, product_id: int, enabled: bool = True) -> Dict:
+        """
+        Enable or disable auto topup for a position.
+        When enabled, margin is automatically added to prevent liquidation.
+        
+        Args:
+            product_id: The product ID
+            enabled: True to enable auto topup (default), False to disable
+            
+        Returns:
+            API response with position details
+        """
+        data = {
+            "product_id": product_id,
+            "auto_topup": "true" if enabled else "false"
+        }
+        return self._request(
+            'PUT',
+            '/v2/positions/auto_topup',
+            data=data,
+            authenticated=True
+        )
+    
+    def set_auto_topup_by_symbol(self, symbol: str, enabled: bool = True) -> Dict:
+        """
+        Enable or disable auto topup using symbol.
+        
+        Args:
+            symbol: Product symbol (e.g., 'BTCUSD')
+            enabled: True to enable auto topup (default), False to disable
+            
+        Returns:
+            API response or error
+        """
+        product_id = self.get_product_id(symbol)
+        if product_id is None:
+            return {"error": f"Could not find product ID for symbol: {symbol}"}
+        return self.set_auto_topup(product_id, enabled)
+    
+    def enable_auto_topup_for_all_symbols(self) -> Dict[str, Dict]:
+        """
+        Enable auto topup for all configured trading symbols.
+        This is useful for preventing liquidation on all positions at once.
+        
+        Returns:
+            Dict mapping symbol to API response
+        """
+        results = {}
+        for symbol in config.TRADING_SYMBOLS:
+            results[symbol] = self.set_auto_topup_by_symbol(symbol, enabled=True)
+        return results
 
 
 # Singleton instance

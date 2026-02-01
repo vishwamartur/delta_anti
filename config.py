@@ -23,6 +23,10 @@ MAX_POSITION_SIZE = int(os.getenv("MAX_POSITION_SIZE", "100"))
 MAX_DAILY_TRADES = 10
 MAX_DRAWDOWN_PERCENT = 0.05
 
+# Leverage Configuration
+DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "200"))  # 200x leverage per trade
+AUTO_TOPUP = os.getenv("AUTO_TOPUP", "true").lower() == "true"  # Auto topup to prevent liquidation
+
 # Technical Indicator Settings
 INDICATOR_CONFIG = {
     "rsi": {
@@ -152,6 +156,8 @@ class Config:
     RISK_PER_TRADE = RISK_PER_TRADE
     MAX_POSITION_SIZE = MAX_POSITION_SIZE
     MAX_DAILY_TRADES = MAX_DAILY_TRADES
+    DEFAULT_LEVERAGE = DEFAULT_LEVERAGE
+    AUTO_TOPUP = AUTO_TOPUP
     INDICATOR_CONFIG = INDICATOR_CONFIG
     SIGNAL_CONFIG = SIGNAL_CONFIG
     ML_CONFIG = ML_CONFIG
