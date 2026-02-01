@@ -27,6 +27,19 @@ MAX_DRAWDOWN_PERCENT = 0.05
 DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "200"))  # 200x leverage per trade
 AUTO_TOPUP = os.getenv("AUTO_TOPUP", "true").lower() == "true"  # Auto topup to prevent liquidation
 
+# Delta Exchange Fee Configuration (X-Mas Offer Active)
+# IMPORTANT: Fees are calculated on NOTIONAL value (spot price × quantity), NOT account balance
+FEE_CONFIG = {
+    "futures_taker": 0.0005,    # 0.05% of notional (market orders)
+    "futures_maker": 0.0002,    # 0.02% of notional (limit orders) <- NOW USING THIS
+    "options_rate": 0.0001,     # 0.010% of notional (X-Mas offer)
+    "options_max_pct": 0.035,   # Capped at 3.5% of premium
+    "order_type": "maker",      # Using LIMIT orders = maker fees (0.02% vs 0.05%)
+}
+
+# Trade Frequency Control (to reduce fee accumulation)
+MIN_TRADE_INTERVAL_SECONDS = int(os.getenv("MIN_TRADE_INTERVAL", "60"))  # Wait 60s between trades
+
 # Technical Indicator Settings
 INDICATOR_CONFIG = {
     "rsi": {
@@ -69,8 +82,19 @@ WS_CHANNELS = {
 SIGNAL_CONFIG = {
     "min_confidence": 60,  # Minimum confidence score to suggest trade (0-100)
     "confirm_candles": 2,   # Number of candles to confirm signal
-    "atr_multiplier_tp": 2.0,  # Take profit at 2x ATR
-    "atr_multiplier_sl": 1.5   # Stop loss at 1.5x ATR
+    # Balanced for 200x leverage - gives room for volatility while limiting risk
+    # 0.5% move = 100% P/L at 200x, so ~0.8% SL = ~160% risk limit
+    "atr_multiplier_tp": 1.2,  # Take profit at 1.2x ATR (~1.5% move)
+    "atr_multiplier_sl": 0.8   # Stop loss at 0.8x ATR (~1% move)
+}
+
+# Adaptive Trading Configuration (learns from trade history)
+ADAPTIVE_TRADING_CONFIG = {
+    "enabled": True,                    # Enable/disable adaptive learning
+    "min_historical_trades": 5,         # Min trades needed to learn from a combo
+    "min_win_rate_threshold": 30,       # Block combos with <30% win rate
+    "min_confidence_threshold": 70,     # Raised baseline confidence
+    "refresh_interval_minutes": 30,     # How often to re-analyze history
 }
 
 # Display Settings
@@ -131,8 +155,8 @@ TRADE_MANAGER_CONFIG = {
     'enable_trailing_stop': True,
     'max_risk_per_trade': float(os.getenv("MAX_RISK_PER_TRADE", "0.02")),  # 2%
     'max_positions': int(os.getenv("MAX_POSITIONS", "10")),  # Increased to 10
-    'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.10")),  # 10% daily loss
-    'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.50")),  # 50% drawdown (from peak)
+    'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.50")),  # 50% daily loss limit (raised for testing)
+    'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.70")),  # 70% max drawdown (from peak)
     'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "1.5")),  # 1.5%
     'strategy_name': 'delta_anti_v1',
     # Fee structure

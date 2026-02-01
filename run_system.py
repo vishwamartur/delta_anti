@@ -56,6 +56,11 @@ class IntegratedTradingSystem:
             trade_config=config.TRADE_MANAGER_CONFIG
         )
         
+        # Reset daily stats on startup to clear any old loss limits
+        if hasattr(self.trade_manager, 'risk_manager'):
+            self.trade_manager.risk_manager.reset_daily_stats()
+            logger.info("[SYSTEM] Daily loss limit reset - fresh start!")
+        
         # Store indicators and signals
         self._indicators = {}
         self._signals = {}

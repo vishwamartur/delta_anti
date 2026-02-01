@@ -239,6 +239,117 @@ class DeltaRestClient:
             params['end_time'] = end_time
         return self._request('GET', '/v2/fills', params=params, authenticated=True)
     
+    # ========== Order Status & Fill Verification ==========
+    
+    def get_order_by_id(self, order_id: int) -> Dict:
+        """
+        Get order details by ID.
+        
+        Args:
+            order_id: The order ID
+            
+        Returns:
+            Order details including status, fill_price, etc.
+        """
+        return self._request('GET', f'/v2/orders/{order_id}', authenticated=True)
+    
+    def wait_for_order_fill(self, order_id: int, max_retries: int = 5, 
+                             retry_delay: float = 1.0) -> Dict:
+        """
+        Wait for an order to be filled by polling its status.
+        
+        Args:
+            order_id: The order ID to check
+            max_retries: Maximum number of status checks (default 5)
+            retry_delay: Seconds between checks (default 1)
+            
+        Returns:
+            Dict with 'filled': True/False, 'fill_price': price if filled,
+            'order': full order data
+        """
+        import time
+        
+        for attempt in range(max_retries):
+            response = self.get_order_by_id(order_id)
+            
+            if 'result' in response:
+                order = response['result']
+                state = order.get('state', '').lower()
+                
+                # Check if filled
+                if state in ('closed', 'filled'):
+                    fill_price = order.get('average_fill_price') or order.get('fill_price')
+                    return {
+                        'filled': True,
+                        'fill_price': float(fill_price) if fill_price else None,
+                        'order': order,
+                        'state': state
+                    }
+                
+                # Check if cancelled or rejected
+                if state in ('cancelled', 'rejected'):
+                    return {
+                        'filled': False,
+                        'fill_price': None,
+                        'order': order,
+                        'state': state,
+                        'error': f"Order {state}"
+                    }
+                
+                # Still pending, wait and retry
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+            else:
+                # API error
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    return {
+                        'filled': False,
+                        'fill_price': None,
+                        'order': None,
+                        'state': 'unknown',
+                        'error': response.get('error', 'Failed to get order status')
+                    }
+        
+        # Timeout - order still pending
+        return {
+            'filled': False,
+            'fill_price': None,
+            'order': None,
+            'state': 'timeout',
+            'error': f"Order not filled after {max_retries} checks"
+        }
+    
+    def verify_position_exists(self, symbol: str) -> Dict:
+        """
+        Verify a position exists on the exchange for a symbol.
+        
+        Args:
+            symbol: Product symbol (e.g., 'BTCUSD')
+            
+        Returns:
+            Dict with 'exists': True/False, 'size', 'entry_price' if exists
+        """
+        response = self.get_positions()
+        
+        if 'result' in response:
+            for pos in response['result']:
+                pos_symbol = pos.get('product', {}).get('symbol', pos.get('product_symbol', ''))
+                size = float(pos.get('size', 0))
+                
+                if pos_symbol == symbol and size != 0:
+                    return {
+                        'exists': True,
+                        'size': abs(size),
+                        'direction': 'LONG' if size > 0 else 'SHORT',
+                        'entry_price': float(pos.get('entry_price', 0)),
+                        'mark_price': float(pos.get('mark_price', 0)),
+                        'unrealized_pnl': float(pos.get('unrealized_pnl', 0))
+                    }
+        
+        return {'exists': False}
+    
     # ========== Leverage Management ==========
     
     def set_leverage(self, product_id: int, leverage: int = None) -> Dict:
@@ -362,6 +473,118 @@ class DeltaRestClient:
         results = {}
         for symbol in config.TRADING_SYMBOLS:
             results[symbol] = self.set_auto_topup_by_symbol(symbol, enabled=True)
+        return results
+    
+    # ========== Margin Management (Prevent Liquidation) ==========
+    
+    def add_margin_to_position(self, product_id: int, delta_margin: float) -> Dict:
+        """
+        Add margin to an existing position to reduce liquidation risk.
+        
+        Args:
+            product_id: The product ID
+            delta_margin: Amount of margin to add (in USD)
+        
+        Returns:
+            API response
+        """
+        data = {
+            "product_id": product_id,
+            "delta_margin": str(delta_margin)
+        }
+        return self._request(
+            'POST',
+            '/v2/positions/change_margin',
+            data=data,
+            authenticated=True
+        )
+    
+    def get_available_balance(self) -> float:
+        """
+        Get available wallet balance for margin.
+        
+        Returns:
+            Available balance in USD
+        """
+        response = self.get_wallet()
+        if 'result' in response:
+            for asset in response['result']:
+                if asset.get('asset_symbol') in ('USDT', 'USD'):
+                    return float(asset.get('available_balance', 0))
+        return 0.0
+    
+    def ensure_max_margin_on_position(self, symbol: str) -> Dict:
+        """
+        Add all available wallet balance as margin to a position.
+        This prevents liquidation by using the full wallet balance.
+        
+        Args:
+            symbol: Product symbol (e.g., 'BTCUSD')
+            
+        Returns:
+            Dict with result of margin addition
+        """
+        product_id = self.get_product_id(symbol)
+        if not product_id:
+            return {"error": f"Could not find product ID for {symbol}"}
+        
+        # Get available balance
+        available = self.get_available_balance()
+        
+        if available <= 0:
+            return {"error": "No available balance to add as margin", "available": available}
+        
+        # Reserve 5% for fees
+        margin_to_add = available * 0.95
+        
+        if margin_to_add < 1:
+            return {"error": "Available balance too low", "available": available}
+        
+        # Add margin to position
+        result = self.add_margin_to_position(product_id, margin_to_add)
+        
+        if result.get('success') or result.get('result'):
+            return {
+                "success": True,
+                "margin_added": margin_to_add,
+                "symbol": symbol,
+                "result": result
+            }
+        
+        return result
+    
+    def protect_all_positions(self) -> Dict[str, Dict]:
+        """
+        Enable auto-topup and add max margin to all open positions.
+        Call this to prevent any liquidation.
+        
+        Returns:
+            Dict mapping symbol to protection result
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        results = {}
+        
+        # First, enable auto-topup for all symbols
+        topup_results = self.enable_auto_topup_for_all_symbols()
+        
+        # Then add max margin to any open positions
+        positions = self.get_positions()
+        if 'result' in positions:
+            for pos in positions['result']:
+                size = float(pos.get('size', 0))
+                if size != 0:  # Has an open position
+                    symbol = pos.get('product', {}).get('symbol', pos.get('product_symbol', ''))
+                    if symbol:
+                        # Add max margin
+                        margin_result = self.ensure_max_margin_on_position(symbol)
+                        results[symbol] = {
+                            "auto_topup": topup_results.get(symbol, {}),
+                            "margin": margin_result
+                        }
+                        logger.info(f"[PROTECTION] {symbol}: auto_topup + max margin added")
+        
         return results
 
 

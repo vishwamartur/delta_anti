@@ -1,13 +1,30 @@
 """
 Trading Signal Generator
 Combines technical indicators to generate trade entry/exit signals.
+Now with ML/AI integration for improved trade quality.
 """
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict
 import config
 from analysis.indicators import IndicatorValues
+
+# ML Components for trade quality improvement
+try:
+    from ml.models.lstm_predictor import lstm_predictor
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    
+try:
+    from ml.sentiment.market_sentiment import sentiment_analyzer
+    SENTIMENT_AVAILABLE = True
+except ImportError:
+    SENTIMENT_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class SignalType(Enum):
@@ -56,11 +73,26 @@ class SignalGenerator:
     """
     Generates trading signals based on technical indicator analysis.
     Combines multiple indicators to determine entry/exit points.
+    Now integrates with TradeHistoryAnalyzer for adaptive parameters.
     """
     
     def __init__(self):
         self.config = config.SIGNAL_CONFIG
         self.rsi_config = config.INDICATOR_CONFIG['rsi']
+        self.adaptive_config = config.ADAPTIVE_TRADING_CONFIG
+        self._analyzer = None  # Lazy load
+        
+    @property
+    def analyzer(self):
+        """Lazy load trade analyzer to avoid circular imports"""
+        if self._analyzer is None and self.adaptive_config.get('enabled', True):
+            try:
+                from strategy.trade_analyzer import analyzer
+                self._analyzer = analyzer
+                logger.info("[ADAPTIVE] TradeHistoryAnalyzer loaded")
+            except ImportError as e:
+                logger.warning(f"[ADAPTIVE] Could not load analyzer: {e}")
+        return self._analyzer
         
     def _calculate_confidence(self, scores: List[int]) -> int:
         """Calculate overall confidence from individual scores."""
@@ -69,18 +101,116 @@ class SignalGenerator:
         return int(sum(scores) / len(scores))
     
     def _get_stop_loss(self, entry: float, atr: float, is_long: bool) -> float:
-        """Calculate stop loss based on ATR."""
+        """Calculate stop loss based on ATR with adaptive adjustment."""
+        # Use adaptive multiplier if available
         multiplier = self.config['atr_multiplier_sl']
+        if self.analyzer:
+            params = self.analyzer.get_adaptive_parameters()
+            multiplier = params.get('sl_atr_multiplier', multiplier)
+        
         if is_long:
             return entry - (atr * multiplier)
         return entry + (atr * multiplier)
     
     def _get_take_profit(self, entry: float, atr: float, is_long: bool) -> float:
-        """Calculate take profit based on ATR."""
+        """Calculate take profit based on ATR with adaptive adjustment."""
+        # Use adaptive multiplier if available
         multiplier = self.config['atr_multiplier_tp']
+        if self.analyzer:
+            params = self.analyzer.get_adaptive_parameters()
+            multiplier = params.get('tp_atr_multiplier', multiplier)
+        
         if is_long:
             return entry + (atr * multiplier)
         return entry - (atr * multiplier)
+    
+    def _get_ml_prediction(self, symbol: str, df=None) -> Dict:
+        """Get ML prediction for price direction and confidence.
+        
+        Returns:
+            Dict with 'direction' ('bullish'/'bearish'), 'confidence' (0-100), 'change_pct'
+        """
+        result = {'direction': 'neutral', 'confidence': 0, 'change_pct': 0.0}
+        
+        if not ML_AVAILABLE:
+            return result
+            
+        try:
+            if df is not None:
+                prediction = lstm_predictor.predict(df)
+                if prediction:
+                    result['direction'] = prediction.direction.lower()
+                    result['confidence'] = int(prediction.confidence * 100)
+                    result['change_pct'] = prediction.predicted_change_pct
+                    logger.info(f"[ML] LSTM prediction: {result['direction']} "
+                               f"({result['confidence']}%, {result['change_pct']:+.2f}%)")
+        except Exception as e:
+            logger.debug(f"[ML] Prediction error: {e}")
+            
+        return result
+    
+    def _get_sentiment(self, symbol: str) -> Dict:
+        """Get market sentiment for symbol.
+        
+        Returns:
+            Dict with 'score' (-1 to 1), 'direction' ('bullish'/'bearish'/'neutral')
+        """
+        result = {'score': 0.0, 'direction': 'neutral', 'confidence': 50}
+        
+        if not SENTIMENT_AVAILABLE:
+            return result
+            
+        try:
+            sentiment_signal = sentiment_analyzer.get_sentiment_signal(symbol)
+            if sentiment_signal:
+                result['score'] = sentiment_signal.get('score', 0)
+                result['direction'] = sentiment_signal.get('direction', 'neutral')
+                result['confidence'] = sentiment_signal.get('strength', 50)
+                logger.info(f"[SENTIMENT] {symbol}: {result['direction']} "
+                           f"(score: {result['score']:.2f})")
+        except Exception as e:
+            logger.debug(f"[SENTIMENT] Analysis error: {e}")
+            
+        return result
+    
+    def _validate_with_ml(self, signal_direction: str, symbol: str, df=None) -> tuple:
+        """Validate technical signal with ML predictions.
+        
+        Returns:
+            (is_confirmed: bool, confidence_boost: int, reasons: list)
+        """
+        is_confirmed = True
+        confidence_boost = 0
+        reasons = []
+        
+        # Get ML prediction
+        ml_pred = self._get_ml_prediction(symbol, df)
+        
+        if ml_pred['confidence'] > 50:
+            # Strong ML prediction
+            expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
+            if ml_pred['direction'] == expected_dir:
+                confidence_boost += 15
+                reasons.append(f"ML confirms {expected_dir} ({ml_pred['confidence']}%)")
+            elif ml_pred['direction'] != 'neutral':
+                # ML disagrees with signal direction
+                is_confirmed = False
+                reasons.append(f"ML conflicts: predicts {ml_pred['direction']}")
+        
+        # Get sentiment
+        sentiment = self._get_sentiment(symbol)
+        
+        if abs(sentiment['score']) > 0.2:
+            expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
+            if sentiment['direction'] == expected_dir:
+                confidence_boost += 10
+                reasons.append(f"Sentiment confirms {expected_dir}")
+            elif sentiment['direction'] != 'neutral':
+                # Sentiment disagrees
+                confidence_boost -= 10
+                reasons.append(f"Sentiment: {sentiment['direction']}")
+        
+        return is_confirmed, confidence_boost, reasons
     
     def analyze_long_signals(self, ind: IndicatorValues) -> tuple:
         """
@@ -234,6 +364,50 @@ class SignalGenerator:
                 reasons=["No clear signal"],
                 indicators=indicators
             )
+        
+        # === ADAPTIVE FILTER: Check if trade should be taken ===
+        if self.analyzer and self.adaptive_config.get('enabled', True):
+            direction = "LONG" if is_long else "SHORT"
+            should_take, reason = self.analyzer.should_take_trade(symbol, direction, confidence)
+            
+            if not should_take:
+                logger.info(f"[ADAPTIVE] BLOCKED {symbol} {direction}: {reason}")
+                return TradeSignal(
+                    symbol=symbol,
+                    signal_type=SignalType.NEUTRAL,
+                    strength=SignalStrength.WEAK,
+                    confidence=confidence,
+                    entry_price=entry_price,
+                    stop_loss=0,
+                    take_profit=0,
+                    timestamp=datetime.now(),
+                    reasons=[f"BLOCKED: {reason}"],
+                    indicators=indicators
+                )
+        
+        # === ML VALIDATION: Confirm signal with AI predictions ===
+        direction = "LONG" if is_long else "SHORT"
+        ml_confirmed, ml_boost, ml_reasons = self._validate_with_ml(direction, symbol)
+        
+        if not ml_confirmed:
+            # ML strongly disagrees with the signal
+            logger.info(f"[ML] BLOCKED {symbol} {direction}: {ml_reasons}")
+            return TradeSignal(
+                symbol=symbol,
+                signal_type=SignalType.NEUTRAL,
+                strength=SignalStrength.WEAK,
+                confidence=confidence,
+                entry_price=entry_price,
+                stop_loss=0,
+                take_profit=0,
+                timestamp=datetime.now(),
+                reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
+                indicators=indicators
+            )
+        
+        # Apply ML confidence boost
+        confidence = min(100, confidence + ml_boost)
+        reasons.extend(ml_reasons)
         
         # Calculate SL and TP
         stop_loss = self._get_stop_loss(entry_price, atr, is_long)

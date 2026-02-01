@@ -330,12 +330,13 @@ class AdvancedTradeManager:
         self.enable_trailing_stop = trade_config.get('enable_trailing_stop', True)
         self.trailing_stop_pct = trade_config.get('trailing_stop_pct', 1.5)
         
-        # Fee structure (Delta Exchange Futures)
-        # Maker: 0.02% | Taker: 0.05% (market orders use taker)
-        self.maker_fee_pct = trade_config.get('maker_fee_pct', 0.02)          # 0.02% maker
-        self.taker_fee_pct = trade_config.get('taker_fee_pct', 0.05)          # 0.05% taker
-        self.total_fee_pct = trade_config.get('total_fee_pct', 0.10)          # Round-trip 0.10%
-        self.min_profit_pct = trade_config.get('min_profit_pct', 0.12)        # Min profit after fees
+        # Fee structure from config (Delta Exchange X-Mas Offer rates)
+        # IMPORTANT: Fees are on NOTIONAL value (price × quantity)
+        fee_config = getattr(config, 'FEE_CONFIG', {})
+        self.maker_fee_pct = fee_config.get('futures_maker', 0.0002) * 100   # 0.02%
+        self.taker_fee_pct = fee_config.get('futures_taker', 0.0005) * 100   # 0.05%
+        self.total_fee_pct = self.taker_fee_pct * 2  # Round-trip (entry + exit)
+        self.min_profit_pct = trade_config.get('min_profit_pct', self.total_fee_pct + 0.02)  # Min profit after fees
         
         # Product ID mapping
         self.product_ids = {}
@@ -357,9 +358,16 @@ class AdvancedTradeManager:
         if trade_config.get('sync_balance_on_start', True):
             self._sync_balance_on_start()
         
+        # Setup leverage and auto-topup for all trading symbols
+        if self.enable_auto_execution:
+            self._setup_leverage_and_topup()
+        
         logger.info(f"AdvancedTradeManager initialized: auto_execution={self.enable_auto_execution}, "
                    f"balance=${self.risk_manager.account_balance:,.2f}, "
                    f"fees={self.total_fee_pct}%")
+        
+        # Trade frequency tracking (to reduce overtrading)
+        self._last_trade_time = None
     
     def _sync_balance_on_start(self):
         """Sync account balance from Delta Exchange on startup"""
@@ -402,6 +410,38 @@ class AdvancedTradeManager:
             logger.warning(f"Could not load product IDs: {e}")
             # Fallback mapping
             self.product_ids = {"BTCUSD": 139, "ETHUSD": 132}
+    
+    def _setup_leverage_and_topup(self):
+        """Setup 200x leverage and auto-topup for all trading symbols"""
+        import config
+        
+        logger.info(f"[SETUP] Configuring {config.DEFAULT_LEVERAGE}x leverage and auto-topup...")
+        
+        for symbol in config.TRADING_SYMBOLS:
+            product_id = self.product_ids.get(symbol)
+            if not product_id:
+                logger.warning(f"[SETUP] No product ID for {symbol}, skipping")
+                continue
+            
+            try:
+                # Set leverage
+                leverage_result = rest_client.set_leverage(product_id, config.DEFAULT_LEVERAGE)
+                if leverage_result.get('success') or leverage_result.get('result'):
+                    logger.info(f"[LEVERAGE] Set {config.DEFAULT_LEVERAGE}x leverage for {symbol}")
+                else:
+                    logger.warning(f"[LEVERAGE] Failed to set leverage for {symbol}: {leverage_result}")
+                
+                # Enable auto-topup (if AUTO_TOPUP is enabled in config)
+                if config.AUTO_TOPUP:
+                    topup_result = rest_client.set_auto_topup(product_id, enabled=True)
+                    if topup_result.get('success') or topup_result.get('result'):
+                        logger.info(f"[AUTO-TOPUP] Enabled for {symbol}")
+                    else:
+                        # Auto-topup may fail if no position exists, which is fine
+                        logger.debug(f"[AUTO-TOPUP] Note for {symbol}: {topup_result}")
+                        
+            except Exception as e:
+                logger.error(f"[SETUP] Error configuring {symbol}: {e}")
     
     def sync_positions(self) -> Dict:
         """
@@ -580,6 +620,15 @@ class AdvancedTradeManager:
             logger.warning(f"Cannot open trade: {reason}")
             return None
         
+        # Check trade frequency cooldown (to reduce fees from overtrading)
+        min_interval = getattr(config, 'MIN_TRADE_INTERVAL_SECONDS', 60)
+        if hasattr(self, '_last_trade_time') and self._last_trade_time:
+            elapsed = (datetime.now() - self._last_trade_time).total_seconds()
+            if elapsed < min_interval:
+                remaining = min_interval - elapsed
+                logger.info(f"[COOLDOWN] Trade frequency limit - wait {remaining:.0f}s")
+                return None
+        
         # Generate trade ID
         trade_id = f"T{int(datetime.now().timestamp() * 1000)}"
         
@@ -595,9 +644,25 @@ class AdvancedTradeManager:
         if direction == TradeDirection.LONG:
             stop_loss = signal.stop_loss if signal.stop_loss else (entry_price - 2 * atr)
             take_profit = signal.take_profit if signal.take_profit else (entry_price + 3 * atr)
+            
+            # VALIDATION: For LONG, SL must be below entry, TP must be above entry
+            if stop_loss >= entry_price:
+                logger.warning(f"[VALIDATION] LONG SL ${stop_loss:.2f} >= entry ${entry_price:.2f}, fixing...")
+                stop_loss = entry_price - 2 * atr
+            if take_profit <= entry_price:
+                logger.warning(f"[VALIDATION] LONG TP ${take_profit:.2f} <= entry ${entry_price:.2f}, fixing...")
+                take_profit = entry_price + 3 * atr
         else:
             stop_loss = signal.stop_loss if signal.stop_loss else (entry_price + 2 * atr)
             take_profit = signal.take_profit if signal.take_profit else (entry_price - 3 * atr)
+            
+            # VALIDATION: For SHORT, SL must be above entry, TP must be below entry
+            if stop_loss <= entry_price:
+                logger.warning(f"[VALIDATION] SHORT SL ${stop_loss:.2f} <= entry ${entry_price:.2f}, fixing...")
+                stop_loss = entry_price + 2 * atr
+            if take_profit >= entry_price:
+                logger.warning(f"[VALIDATION] SHORT TP ${take_profit:.2f} >= entry ${entry_price:.2f}, fixing...")
+                take_profit = entry_price - 3 * atr
         
         # Calculate position size
         position_size = self.risk_manager.calculate_position_size(
@@ -642,7 +707,29 @@ class AdvancedTradeManager:
             trade.entry_time = datetime.now()
             trade.state = TradeState.ACTIVE
             self.open_trades[trade_id] = trade
-            logger.info(f"Paper trade activated: {trade_id}")
+            
+            # ===== DETAILED TRADE ENTRY LOG =====
+            notional = trade.entry_price * trade.entry_size
+            sl_distance = abs(trade.entry_price - trade.stop_loss)
+            tp_distance = abs(trade.take_profit - trade.entry_price)
+            sl_pct = (sl_distance / trade.entry_price * 100) if trade.entry_price else 0
+            tp_pct = (tp_distance / trade.entry_price * 100) if trade.entry_price else 0
+            est_fees = notional * (self.total_fee_pct / 100)
+            rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+            
+            logger.info("=" * 60)
+            logger.info(f"[ENTRY] {trade.symbol} {trade.direction.value} @ ${trade.entry_price:,.2f}")
+            logger.info("-" * 40)
+            logger.info(f"  Size:      {trade.entry_size} contracts")
+            logger.info(f"  Notional:  ${notional:,.2f}")
+            logger.info(f"  Stop Loss: ${trade.stop_loss:,.2f} ({sl_pct:.2f}% away)")
+            logger.info(f"  Take Profit: ${trade.take_profit:,.2f} ({tp_pct:.2f}% away)")
+            logger.info(f"  Risk/Reward: {rr_ratio:.1f}x")
+            logger.info(f"  Est. Fees:   ${est_fees:.2f} (round-trip)")
+            logger.info("=" * 60)
+        
+        # Update last trade time for cooldown tracking
+        self._last_trade_time = datetime.now()
         
         self._save_trades()
         return trade
@@ -658,53 +745,143 @@ class AdvancedTradeManager:
             # Ensure size is at least 1 contract
             order_size = max(1, int(trade.entry_size))
             
-            logger.info(f"[LIVE] Placing {side.upper()} order: {trade.symbol} x{order_size}")
+            logger.info(f"[LIVE] Placing {side.upper()} LIMIT order: {trade.symbol} x{order_size}")
             
-            # Place market order for entry
+            # Use LIMIT orders to get maker fees (0.02%) instead of taker fees (0.05%)
+            # Price slightly better than current to ensure fill while getting maker rebate
+            # For BUY: slightly above current price (willing to pay a bit more)
+            # For SELL: slightly below current price (willing to accept a bit less)
+            order_type = "limit_order"
+            limit_price = trade.entry_price
+            
+            # Aggressive limit: 0.01% favorable to ensure quick fill
+            price_offset = trade.entry_price * 0.0001  # 0.01%
+            if side == "buy":
+                limit_price = trade.entry_price + price_offset  # Slightly higher buy limit
+            else:
+                limit_price = trade.entry_price - price_offset  # Slightly lower sell limit
+            
             response = rest_client.place_order(
                 symbol=trade.symbol,
                 side=side,
                 size=order_size,
-                order_type="market_order"
+                order_type=order_type,
+                limit_price=round(limit_price, 2)  # Round to avoid precision issues
             )
             
             logger.info(f"[LIVE] Order response: {response}")
             
             if response.get('success') or response.get('result'):
                 order_data = response.get('result', {})
+                order_id = order_data.get('id')
                 
                 # Create entry order record
                 trade.entry_order = Order(
-                    order_id=str(order_data.get('id', '')),
+                    order_id=str(order_id) if order_id else '',
                     client_order_id=order_data.get('client_order_id', ''),
                     symbol=trade.symbol,
                     side=side,
                     order_type='market',
                     size=order_size,
-                    status='filled'  # Market orders fill immediately
+                    status='pending'  # Will update after verification
                 )
                 
-                # Get fill price from response or use entry price
-                fill_price = order_data.get('fill_price') or order_data.get('average_fill_price')
-                if fill_price:
-                    trade.entry_price = float(fill_price)
-                    trade.entry_order.average_fill_price = float(fill_price)
+                # ===== FILL VERIFICATION =====
+                fill_verified = False
+                fill_price = None
                 
-                # ACTIVATE THE TRADE
-                trade.entry_time = datetime.now()
-                trade.entry_size = order_size
-                trade.state = TradeState.ACTIVE
-                trade.current_price = trade.entry_price
+                # First check if fill_price is in initial response (immediate fill)
+                immediate_fill = order_data.get('fill_price') or order_data.get('average_fill_price')
+                if immediate_fill:
+                    fill_verified = True
+                    fill_price = float(immediate_fill)
+                    logger.info(f"[FILL] Immediate fill at ${fill_price:.2f}")
                 
-                # Add to open trades
-                self.open_trades[trade.trade_id] = trade
+                # If not immediately filled, poll for fill status
+                if not fill_verified and order_id:
+                    logger.info(f"[FILL] Waiting for order {order_id} to fill...")
+                    fill_result = rest_client.wait_for_order_fill(order_id, max_retries=5, retry_delay=1.0)
+                    
+                    if fill_result.get('filled'):
+                        fill_verified = True
+                        fill_price = fill_result.get('fill_price') or trade.entry_price
+                        logger.info(f"[FILL] Order {order_id} verified filled at ${fill_price:.2f}")
+                    else:
+                        logger.warning(f"[FILL] Order {order_id} not confirmed: {fill_result.get('error', 'Unknown')}")
                 
-                self._save_trades()
+                # Final verification: check position exists on exchange
+                if fill_verified:
+                    position_check = rest_client.verify_position_exists(trade.symbol)
+                    if position_check.get('exists'):
+                        logger.info(f"[POSITION] Verified: {position_check['direction']} x{position_check['size']} @ ${position_check['entry_price']:.2f}")
+                        # Use actual entry price from position if available
+                        if position_check.get('entry_price'):
+                            fill_price = position_check['entry_price']
+                    else:
+                        logger.warning(f"[POSITION] Position not found on exchange after fill!")
                 
-                logger.info(f"[LIVE] Trade ACTIVATED: {trade.trade_id}, "
-                           f"OrderID={trade.entry_order.order_id}, "
-                           f"Fill=${trade.entry_price:.2f}")
-                return True
+                # Update trade with fill info
+                if fill_verified and fill_price:
+                    trade.entry_price = fill_price
+                    trade.entry_order.average_fill_price = fill_price
+                    trade.entry_order.status = 'filled'
+                    
+                    # ACTIVATE THE TRADE
+                    trade.entry_time = datetime.now()
+                    trade.entry_size = order_size
+                    trade.state = TradeState.ACTIVE
+                    trade.current_price = trade.entry_price
+                    
+                    # Add to open trades
+                    self.open_trades[trade.trade_id] = trade
+                    
+                    self._save_trades()
+                    
+                    # ===== DETAILED LIVE TRADE ENTRY LOG =====
+                    notional = trade.entry_price * trade.entry_size
+                    sl_distance = abs(trade.entry_price - trade.stop_loss) if trade.stop_loss else 0
+                    tp_distance = abs(trade.take_profit - trade.entry_price) if trade.take_profit else 0
+                    sl_pct = (sl_distance / trade.entry_price * 100) if trade.entry_price else 0
+                    tp_pct = (tp_distance / trade.entry_price * 100) if trade.entry_price else 0
+                    est_fees = notional * (self.total_fee_pct / 100) * 2  # Round-trip
+                    rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+                    
+                    logger.info("=" * 60)
+                    logger.info(f"[LIVE ENTRY] {trade.symbol} {trade.direction.value} @ ${trade.entry_price:,.2f}")
+                    logger.info(f"  Order ID: {trade.entry_order.order_id}")
+                    logger.info("-" * 40)
+                    logger.info(f"  Size:      {trade.entry_size} contracts")
+                    logger.info(f"  Notional:  ${notional:,.2f}")
+                    logger.info(f"  Stop Loss: ${trade.stop_loss:,.2f} ({sl_pct:.2f}% away)")
+                    logger.info(f"  Take Profit: ${trade.take_profit:,.2f} ({tp_pct:.2f}% away)")
+                    logger.info(f"  Risk/Reward: {rr_ratio:.1f}x")
+                    logger.info(f"  Est. Fees:   ${est_fees:.2f} (round-trip @ {self.total_fee_pct}%)")
+                    logger.info("=" * 60)
+                    
+                    # === PROTECT POSITION: Add max margin + enable auto-topup ===
+                    try:
+                        # Enable auto-topup to prevent liquidation
+                        topup_result = rest_client.set_auto_topup(product_id, enabled=True)
+                        logger.info(f"[PROTECTION] Auto-topup enabled for {trade.symbol}")
+                        
+                        # Add all available margin to position
+                        margin_result = rest_client.ensure_max_margin_on_position(trade.symbol)
+                        if margin_result.get('success'):
+                            logger.info(f"[PROTECTION] Added ${margin_result.get('margin_added', 0):.2f} margin to {trade.symbol}")
+                        else:
+                            logger.debug(f"[PROTECTION] Margin add note: {margin_result}")
+                    except Exception as protection_error:
+                        logger.warning(f"[PROTECTION] Could not fully protect position: {protection_error}")
+                    
+                    return True
+                else:
+                    # Fill not verified - mark as failed
+                    logger.error(f"[LIVE] Trade fill NOT verified, marking as rejected")
+                    trade.state = TradeState.REJECTED
+                    trade.notes = "Order placed but fill not verified"
+                    self._save_trades()
+                    return False
+                    
             else:
                 error_msg = response.get('error', response)
                 logger.error(f"[LIVE] Order placement FAILED: {error_msg}")
@@ -736,22 +913,38 @@ class AdvancedTradeManager:
             self._update_trailing_stop(trade)
     
     def _update_trailing_stop(self, trade: Trade):
-        """Update trailing stop loss based on favorable price movement"""
+        """Update trailing stop loss based on favorable price movement.
+        ONLY activates after trade is at least 0.5% in profit to prevent immediate exits.
+        """
+        
+        # Calculate current profit percentage
+        if trade.entry_price <= 0:
+            return
+            
+        if trade.is_long:
+            profit_pct = ((trade.current_price - trade.entry_price) / trade.entry_price) * 100
+        else:
+            profit_pct = ((trade.entry_price - trade.current_price) / trade.entry_price) * 100
+        
+        # Only activate trailing stop after minimum profit (0.5%)
+        min_profit_for_trailing = 0.5
+        if profit_pct < min_profit_for_trailing:
+            return  # Don't trail until we have some profit
         
         if trade.is_long:
             # For long positions, trail stop up
             new_stop = trade.current_price * (1 - trade.trailing_stop_pct / 100)
             if trade.trailing_stop_price is None or new_stop > trade.trailing_stop_price:
-                if trade.trailing_stop_price is None or new_stop > trade.stop_loss:
+                if new_stop > trade.stop_loss:  # Must be better than original SL
                     trade.trailing_stop_price = new_stop
-                    logger.debug(f"Trailing stop updated: {trade.trade_id} SL=${new_stop:.2f}")
+                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} (profit: {profit_pct:.2f}%)")
         else:
             # For short positions, trail stop down
             new_stop = trade.current_price * (1 + trade.trailing_stop_pct / 100)
             if trade.trailing_stop_price is None or new_stop < trade.trailing_stop_price:
-                if trade.trailing_stop_price is None or new_stop < trade.stop_loss:
+                if new_stop < trade.stop_loss:  # Must be better than original SL
                     trade.trailing_stop_price = new_stop
-                    logger.debug(f"Trailing stop updated: {trade.trade_id} SL=${new_stop:.2f}")
+                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} (profit: {profit_pct:.2f}%)")
     
     def check_exit_conditions(self, trade_id: str) -> Optional[ExitReason]:
         """Check if trade should be exited"""
@@ -844,8 +1037,32 @@ class AdvancedTradeManager:
         
         self._save_trades()
         
-        logger.info(f"Trade closed: {trade_id} - {exit_reason.value}, "
-                   f"P&L=${trade.realized_pnl:.2f} ({trade.pnl_percent:+.2f}%)")
+        # ===== DETAILED TRADE EXIT LOG =====
+        duration_sec = (trade.exit_time - trade.entry_time).total_seconds() if trade.entry_time else 0
+        price_change = trade.exit_price - trade.entry_price
+        price_change_pct = (price_change / trade.entry_price * 100) if trade.entry_price else 0
+        
+        # Calculate gross P/L before fees
+        if trade.is_long:
+            gross_pnl = (trade.exit_price - trade.entry_price) * trade.entry_size
+        else:
+            gross_pnl = (trade.entry_price - trade.exit_price) * trade.entry_size
+        
+        # Notional value for fee context
+        notional = trade.entry_price * trade.entry_size
+        
+        logger.info("=" * 60)
+        logger.info(f"[CLOSED] {trade.symbol} {trade.direction.value} - {exit_reason.value}")
+        logger.info("-" * 40)
+        logger.info(f"  Entry:     ${trade.entry_price:,.2f} x {trade.entry_size}")
+        logger.info(f"  Exit:      ${trade.exit_price:,.2f} ({price_change:+,.2f} / {price_change_pct:+.3f}%)")
+        logger.info(f"  Duration:  {int(duration_sec)}s ({trade.duration_minutes}m)")
+        logger.info("-" * 40)
+        logger.info(f"  Notional:  ${notional:,.2f}")
+        logger.info(f"  Gross P/L: ${gross_pnl:+.2f}")
+        logger.info(f"  Fees:      ${trade.fees_paid:.2f} ({self.total_fee_pct:.2f}% x2)")
+        logger.info(f"  NET P/L:   ${trade.realized_pnl:+.2f} ({trade.pnl_percent:+.2f}%)")
+        logger.info("=" * 60)
         
         return trade
     
@@ -857,13 +1074,23 @@ class AdvancedTradeManager:
             side = "sell" if trade.is_long else "buy"
             order_size = max(1, int(trade.entry_size))
             
-            logger.info(f"[LIVE] Placing EXIT {side.upper()} order: {trade.symbol} x{order_size}")
+            logger.info(f"[LIVE] Placing EXIT {side.upper()} LIMIT order: {trade.symbol} x{order_size}")
+            
+            # Use LIMIT orders for exits too to get maker fees (0.02% vs 0.05%)
+            limit_price = exit_price
+            price_offset = exit_price * 0.0001  # 0.01% offset for quick fill
+            
+            if side == "sell":  # Closing LONG = selling
+                limit_price = exit_price - price_offset  # Slightly lower sell limit
+            else:  # Closing SHORT = buying
+                limit_price = exit_price + price_offset  # Slightly higher buy limit
             
             response = rest_client.place_order(
                 symbol=trade.symbol,
                 side=side,
                 size=order_size,
-                order_type="market_order",
+                order_type="limit_order",
+                limit_price=round(limit_price, 2),
                 reduce_only=True
             )
             

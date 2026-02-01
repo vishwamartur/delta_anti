@@ -169,8 +169,8 @@ class Dashboard:
                 f"${trade.entry_price:,.2f}",
                 f"${current_price:,.2f}",
                 Text(f"{trade.pnl_percent:+.2f}%", style=f"bold {pnl_color}"),
-                f"${trade.stop_loss:,.2f}",
-                f"${trade.take_profit:,.2f}",
+                f"${trade.stop_loss:,.2f}" if trade.stop_loss is not None else "---",
+                f"${trade.take_profit:,.2f}" if trade.take_profit is not None else "---",
                 f"{trade.duration_minutes}m"
             )
         
