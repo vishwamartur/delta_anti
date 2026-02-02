@@ -7,11 +7,14 @@ A **production-ready** quantitative trading system for Delta Exchange with **AI/
 ### 🤖 AI/ML Trading Intelligence
 - **Lag-Llama Forecaster**: Time series foundation model for price predictions
 - **LSTM Predictor**: Bidirectional LSTM with attention mechanism
-- **FinBERT Sentiment**: Financial news sentiment analysis
+- **FinBERT Sentiment**: Financial news sentiment analysis (local & cloud)
+- **Hugging Face Inference API**: Cloud-based AI models for sentiment and classification
+- **DQN Trading Agent**: Deep Q-Network reinforcement learning for optimal actions
 - **Adaptive Learning**: Learns from trade history to improve decisions
 
-### 📈 Advanced Trading
-- **200x Leverage Support**: Risk management optimized for high leverage
+### 📈 Advanced Trading Strategies
+- **Momentum Trading**: 200x leverage with risk management
+- **Low Volatility Strategy**: Range trading for sideways markets (mean reversion)
 - **Limit Orders**: Uses maker orders (0.02% fees vs 0.05% taker)
 - **Auto-Topup**: Prevents liquidation by adding margin automatically
 - **Trailing Stops**: Activates after 0.5% profit to lock in gains
@@ -19,8 +22,16 @@ A **production-ready** quantitative trading system for Delta Exchange with **AI/
 
 ### 📊 Technical Analysis
 - **Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
+- **Market Regime Detection**: Auto-detects trending vs ranging markets
 - **Signal Validation**: ML confirms technical signals before entry
 - **Confidence Scores**: 0-100% confidence on every signal
+
+### 🖥️ Real-Time Dashboard
+- **Rich Terminal UI**: Beautiful console dashboard with live updates
+- **Market Prices**: Real-time price feeds and changes
+- **Signal Monitoring**: Active signals with confidence levels
+- **Position Tracking**: Open positions with P&L display
+- **System Messages**: Trade alerts and status updates
 
 ### 🌐 REST API Server
 - **FastAPI Server**: Production-ready endpoints
@@ -63,10 +74,14 @@ DELTA_API_SECRET=your_api_secret
 DELTA_REST_URL=https://api.india.delta.exchange
 DELTA_WS_URL=wss://socket.india.delta.exchange
 
+# Hugging Face (for cloud AI inference)
+HF_TOKEN=your_huggingface_token
+
 # Trading
 TRADING_SYMBOLS=BTCUSD,ETHUSD
 DEFAULT_TIMEFRAME=5m
 RISK_PER_TRADE=0.10          # 10% risk per trade
+RISK_AMOUNT_USD=300          # Fixed $300 risk per trade
 DEFAULT_LEVERAGE=200
 AUTO_TOPUP=true
 AUTO_EXECUTION=true
@@ -80,9 +95,11 @@ MIN_TRADE_INTERVAL=60        # Seconds between trades
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `RISK_PER_TRADE` | 0.10 | 10% of balance risked per trade |
+| `RISK_AMOUNT_USD` | 300 | Fixed USD risk per trade |
 | `DEFAULT_LEVERAGE` | 200 | Leverage multiplier |
 | `AUTO_TOPUP` | true | Adds margin to prevent liquidation |
 | `MIN_TRADE_INTERVAL` | 60 | Cooldown between trades (seconds) |
+| `HF_TOKEN` | - | Hugging Face API token for cloud inference |
 
 ---
 
@@ -111,9 +128,31 @@ Analyzes crypto news sentiment before trades.
 [SENTIMENT] BTCUSD: bullish (score: 0.45)
 ```
 
+### 4. Hugging Face Inference API
+Cloud-based AI models when local GPU unavailable.
+
+```bash
+# Set your HF token in .env
+HF_TOKEN=hf_your_token_here
+```
+
+**Features:**
+- FinBERT sentiment via API
+- Zero-shot market regime classification
+- News summarization
+
+### 5. DQN Trading Agent
+Deep Q-Network for reinforcement learning-based trading.
+
+**Features:**
+- State: 50 features (indicators + price data)
+- Actions: Buy, Sell, Hold
+- Experience replay buffer
+- Epsilon-greedy exploration
+
 ### Model Fallback Chain
 ```
-Lag-Llama → LSTM → Momentum → Technical Only
+Lag-Llama → LSTM → HF Inference → Momentum → Technical Only
 ```
 
 ---
@@ -123,6 +162,7 @@ Lag-Llama → LSTM → Momentum → Technical Only
 ```
 delta_anti/
 ├── run_system.py              # Main entry point
+├── main.py                    # Alternative entry with UI
 ├── config.py                  # Configuration
 ├── .env                       # API credentials
 │
@@ -132,13 +172,16 @@ delta_anti/
 │   └── server/                # FastAPI server
 │
 ├── ml/                        # Machine Learning
+│   ├── hf_inference.py            # Hugging Face Inference API client
 │   ├── models/
 │   │   ├── lstm_predictor.py      # LSTM model
 │   │   └── lag_llama_predictor.py # Lag-Llama model
+│   ├── agents/
+│   │   └── dqn_trader.py          # DQN reinforcement learning
 │   ├── features/
 │   │   └── feature_engineer.py    # 100+ features
 │   └── sentiment/
-│       └── market_sentiment.py    # FinBERT
+│       └── market_sentiment.py    # FinBERT sentiment
 │
 ├── analysis/
 │   ├── indicators.py          # Technical indicators
@@ -146,7 +189,11 @@ delta_anti/
 │
 ├── strategy/
 │   ├── advanced_trade_manager.py  # Trade execution
+│   ├── range_strategy.py          # Low volatility strategy
 │   └── trade_analyzer.py          # Adaptive learning
+│
+├── ui/
+│   └── dashboard.py           # Rich terminal dashboard
 │
 ├── scripts/
 │   └── install_lag_llama.py   # ML setup script
@@ -157,10 +204,42 @@ delta_anti/
 
 ---
 
+## 📉 Low Volatility Strategy
+
+Automatically switches to range trading when markets are sideways.
+
+### How It Works
+1. **Regime Detection**: ADX < 25 indicates ranging market
+2. **Mean Reversion**: Buy at lower BB, sell at upper BB
+3. **Tight Targets**: 0.3% take profit, 0.4% stop loss
+4. **Scalping Mode**: Quick trades for small, consistent gains
+
+```
+[RANGE] BTCUSD: LONG @ $78,450 (BB position: 0.12)
+  Regime: ranging | ADX: 18.5
+  TP: $78,685 (0.3%) | SL: $78,136 (0.4%)
+```
+
+---
+
 ## 📊 Trading Dashboard
 
-When running, you'll see:
+Rich terminal dashboard using the `rich` library:
 
+```
+╔════════════════════════════════════════════════════════════╗
+║         📈 DELTA ANTI TRADING SYSTEM 📈              ║
+╠════════════════════════════════════════════════════════════╣
+║ MARKET PRICES                                      ║
+║ BTCUSD  $78,500.00  ▲+1.25%   ETHUSD  $2,150.00    ║
+╠════════════════════════════════════════════════════════════╣
+║ SIGNALS          | POSITIONS                        ║
+║ BTCUSD: LONG 72% | BTCUSD SHORT @ $78,600 [-0.12%]  ║
+║ ETHUSD: HOLD 45% | ---                              ║
+╚════════════════════════════════════════════════════════════╝
+```
+
+### Trade Entry Alerts
 ```
 ============================================================
 [LIVE ENTRY] BTCUSD SHORT @ $78,500.00

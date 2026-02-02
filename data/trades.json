@@ -107,13 +107,13 @@
       "take_profit": null,
       "trailing_stop_price": null,
       "state": "ACTIVE",
-      "current_price": 2246.09263148,
+      "current_price": 2247.74660416,
       "realized_pnl": 0.0,
-      "unrealized_pnl": 4.16352629,
-      "pnl_percent": 187.95622275989356,
+      "unrealized_pnl": 4.49432083,
+      "pnl_percent": 202.88945193087991,
       "ml_confidence": 0.0,
       "strategy_name": "external",
-      "duration_minutes": 69
+      "duration_minutes": 77
     },
     "T1770018450418": {
       "trade_id": "T1770018450418",
@@ -130,13 +130,13 @@
       "take_profit": 75898.35714285714,
       "trailing_stop_price": null,
       "state": "ACTIVE",
-      "current_price": 76756.24417071,
+      "current_price": 76896.74700252,
       "realized_pnl": 0.0,
-      "unrealized_pnl": 0.14975582,
-      "pnl_percent": 25.161075026183305,
+      "unrealized_pnl": 0.00925299,
+      "pnl_percent": 1.5546319041658871,
       "ml_confidence": 68,
       "strategy_name": "delta_anti_v1",
-      "duration_minutes": 48
+      "duration_minutes": 56
     }
   },
   "history": [
@@ -199,5 +199,5 @@
     "max_drawdown": 0.0,
     "total_fees_paid": 306.14
   },
-  "last_updated": "2026-02-02T14:06:05.363151"
+  "last_updated": "2026-02-02T14:14:04.350093"
 }
