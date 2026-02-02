@@ -30,6 +30,13 @@ try:
 except ImportError:
     LAG_LLAMA_AVAILABLE = False
 
+# Range trading strategy for slow markets
+try:
+    from strategy.range_strategy import get_range_strategy, MarketRegime
+    RANGE_STRATEGY_AVAILABLE = True
+except ImportError:
+    RANGE_STRATEGY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -377,7 +384,33 @@ class SignalGenerator:
             reasons = short_reasons
             is_long = False
         else:
-            # No clear signal
+            # No clear momentum signal - try range/scalping strategy for slow markets
+            if RANGE_STRATEGY_AVAILABLE:
+                range_strat = get_range_strategy()
+                range_signal = range_strat.generate_signal(symbol, indicators, entry_price)
+                
+                if range_signal and range_signal.confidence >= self.config['min_confidence']:
+                    # Convert range signal to TradeSignal
+                    is_long = range_signal.direction == "LONG"
+                    signal_type = SignalType.LONG if is_long else SignalType.SHORT
+                    
+                    logger.info(f"[RANGE] Using range strategy for slow market: "
+                               f"{signal_type.value} (confidence={range_signal.confidence:.0f}%)")
+                    
+                    return TradeSignal(
+                        symbol=symbol,
+                        signal_type=signal_type,
+                        strength=SignalStrength.MODERATE,
+                        confidence=int(range_signal.confidence),
+                        entry_price=range_signal.entry_price,
+                        stop_loss=range_signal.stop_loss,
+                        take_profit=range_signal.take_profit,
+                        timestamp=datetime.now(),
+                        reasons=[f"[RANGE] {range_signal.reason}"],
+                        indicators=indicators
+                    )
+            
+            # No trend or range signal
             return TradeSignal(
                 symbol=symbol,
                 signal_type=SignalType.NEUTRAL,
@@ -387,7 +420,7 @@ class SignalGenerator:
                 stop_loss=0,
                 take_profit=0,
                 timestamp=datetime.now(),
-                reasons=["No clear signal"],
+                reasons=["No clear signal (momentum or range)"],
                 indicators=indicators
             )
         
