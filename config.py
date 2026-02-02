@@ -17,15 +17,19 @@ WS_URL = os.getenv("DELTA_WS_URL", "wss://socket.india.delta.exchange")
 TRADING_SYMBOLS = os.getenv("TRADING_SYMBOLS", "BTCUSD,ETHUSD").split(",")
 DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "5m")
 
-# Risk Management
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))
+# Risk Management - Aggressive for faster profits
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.25"))  # 25% risk per trade (fallback)
+RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "300"))  # Fixed $300 risk per trade
 MAX_POSITION_SIZE = int(os.getenv("MAX_POSITION_SIZE", "100"))
-MAX_DAILY_TRADES = 10
-MAX_DRAWDOWN_PERCENT = 0.05
+MAX_DAILY_TRADES = 20  # More trades allowed
+MAX_DRAWDOWN_PERCENT = 0.70  # Allow more drawdown
 
 # Leverage Configuration
 DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "200"))  # 200x leverage per trade
 AUTO_TOPUP = os.getenv("AUTO_TOPUP", "true").lower() == "true"  # Auto topup to prevent liquidation
+
+# Margin Usage - Use 95% of available balance for maximum profit
+MARGIN_USAGE_PCT = float(os.getenv("MARGIN_USAGE_PCT", "0.95"))
 
 # Delta Exchange Fee Configuration (X-Mas Offer Active)
 # IMPORTANT: Fees are calculated on NOTIONAL value (spot price × quantity), NOT account balance
@@ -80,12 +84,14 @@ WS_CHANNELS = {
 
 # Signal Configuration
 SIGNAL_CONFIG = {
-    "min_confidence": 60,  # Minimum confidence score to suggest trade (0-100)
-    "confirm_candles": 2,   # Number of candles to confirm signal
-    # Balanced for 200x leverage - gives room for volatility while limiting risk
-    # 0.5% move = 100% P/L at 200x, so ~0.8% SL = ~160% risk limit
-    "atr_multiplier_tp": 1.2,  # Take profit at 1.2x ATR (~1.5% move)
-    "atr_multiplier_sl": 0.8   # Stop loss at 0.8x ATR (~1% move)
+    "min_confidence": 55,  # Lower threshold for more trades
+    "confirm_candles": 1,   # Quick entry
+    # PROFIT TARGET: $1 per $100 (1% return)
+    # With 200x leverage: 0.005% price move = 1% account return
+    # Using tight TP for quick, consistent profits
+    "atr_multiplier_tp": 0.4,  # Tight TP (~0.5% move = 100% at 200x = 1% account)
+    "atr_multiplier_sl": 0.6,  # SL slightly wider than TP
+    "min_profit_target_pct": 1.0,  # Minimum 1% account return per trade
 }
 
 # Adaptive Trading Configuration (learns from trade history)

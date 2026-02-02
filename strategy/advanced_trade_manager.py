@@ -247,14 +247,20 @@ class RiskManager:
     def calculate_position_size(self, entry_price: float, stop_loss: float, 
                                symbol: str = "BTCUSD") -> float:
         """
-        Calculate position size based on risk percentage
-        Position Size = (Account * Risk%) / |Entry - Stop Loss|
+        Calculate position size based on fixed USD risk amount.
+        Uses RISK_AMOUNT_USD from config ($300 default).
+        Position Size = Risk Amount / |Entry - Stop Loss|
         """
         if stop_loss == 0 or entry_price == 0:
             logger.warning("Invalid prices for position sizing")
             return 0.0
         
-        risk_amount = self.account_balance * self.max_risk_per_trade
+        # Use fixed USD risk amount from config (default $300)
+        risk_amount = getattr(config, 'RISK_AMOUNT_USD', 300)
+        
+        # Cap at available balance
+        risk_amount = min(risk_amount, self.account_balance * 0.95)
+        
         price_risk = abs(entry_price - stop_loss)
         
         if price_risk == 0:
@@ -262,9 +268,9 @@ class RiskManager:
         
         position_size = risk_amount / price_risk
         
-        # Apply maximum position limits (e.g., max 25% of capital per trade)
-        max_position_value = self.account_balance * 0.25
-        max_size = max_position_value / entry_price
+        # Apply maximum position limits
+        max_position_value = self.account_balance * 0.95  # Use 95% of balance max
+        max_size = max_position_value / entry_price * config.DEFAULT_LEVERAGE
         
         position_size = min(position_size, max_size)
         
