@@ -78,8 +78,45 @@ class IntegratedTradingSystem:
         sys.exit(0)
     
     def _on_ticker(self, data):
-        """Handle ticker updates."""
+        """Handle ticker updates - REAL-TIME exit condition checking."""
         market_data.update_ticker(data)
+        
+        # Extract symbol and price from ticker
+        symbol = data.get('symbol', '')
+        if not symbol or symbol.startswith('MARK:'):
+            return
+        
+        # Get current price from ticker (mark_price or last_price)
+        current_price = None
+        if 'mark_price' in data:
+            current_price = float(data['mark_price'])
+        elif 'close' in data:
+            current_price = float(data['close'])
+        elif 'last_price' in data:
+            current_price = float(data['last_price'])
+        
+        if not current_price or current_price <= 0:
+            return
+        
+        # === REAL-TIME EXIT CHECK ===
+        # Check all open trades for this symbol on EVERY ticker update
+        for trade_id, trade in list(self.trade_manager.open_trades.items()):
+            if trade.symbol == symbol:
+                # Update P&L with real-time price
+                self.trade_manager.update_trade_pnl(trade_id, current_price)
+                
+                # Immediately check exit conditions (TP/SL/Trailing)
+                exit_reason = self.trade_manager.check_exit_conditions(trade_id)
+                if exit_reason:
+                    logger.info(f"[REAL-TIME] {symbol} hit {exit_reason.value} @ ${current_price:,.2f}")
+                    closed_trade = self.trade_manager.close_trade(
+                        trade_id, exit_reason, current_price
+                    )
+                    if closed_trade:
+                        dashboard.update(
+                            message=f"🎯 {exit_reason.value}: {symbol} @ ${current_price:,.2f} | "
+                                   f"P&L: ${closed_trade.realized_pnl:+.2f} ({closed_trade.pnl_percent:+.2f}%)"
+                        )
     
     def _on_candlestick(self, data):
         """Handle candlestick updates."""
@@ -169,6 +206,7 @@ class IntegratedTradingSystem:
             ws_client.subscribe_ticker(self.symbols)
             ws_client.subscribe_candlestick(self.symbols, self.timeframe)
             print(f"[SYSTEM] WebSocket connected - Subscribed to {self.symbols}")
+            print(f"[SYSTEM] ✅ Real-time TP/SL monitoring ACTIVE via ticker updates")
         else:
             print("[SYSTEM] WebSocket failed - Running in REST-only mode")
     

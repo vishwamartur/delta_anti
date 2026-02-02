@@ -19,7 +19,7 @@ DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "5m")
 
 # Risk Management - Aggressive for faster profits
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.25"))  # 25% risk per trade (fallback)
-RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "300"))  # Fixed $300 risk per trade
+RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "500"))  # Fixed $300 risk per trade
 MAX_POSITION_SIZE = int(os.getenv("MAX_POSITION_SIZE", "100"))
 MAX_DAILY_TRADES = 20  # More trades allowed
 MAX_DRAWDOWN_PERCENT = 0.70  # Allow more drawdown

@@ -256,7 +256,7 @@ class RiskManager:
             return 0.0
         
         # Use fixed USD risk amount from config (default $300)
-        risk_amount = getattr(config, 'RISK_AMOUNT_USD', 300)
+        risk_amount = getattr(config, 'RISK_AMOUNT_USD', 500)
         
         # Cap at available balance
         risk_amount = min(risk_amount, self.account_balance * 0.95)

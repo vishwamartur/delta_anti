@@ -61,7 +61,7 @@ class HuggingFaceClient:
         }
         
         self._cache = {}
-        self._cache_ttl = 300  # 5 minutes
+        self._cache_ttl = 500  # 5 minutes
         
         logger.info(f"[HF] Client initialized: token={'*****' + self.token[-4:] if self.token else 'MISSING'}")
     
