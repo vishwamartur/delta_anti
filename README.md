@@ -1,129 +1,263 @@
-# Delta Exchange Real-Time Trading System
+# Delta Anti - AI-Powered Trading System
 
-A Python-based quantitative trading system for Delta Exchange with **ML-powered predictions** and **REST API server**.
+A **production-ready** quantitative trading system for Delta Exchange with **AI/ML predictions**, **adaptive learning**, and **200x leverage support**.
 
 ## ✨ Features
 
-### Core Trading
-- **Real-Time Data**: WebSocket streaming of OHLC candles and tickers
-- **Technical Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
-- **Trade Signals**: Long/Short entry with confidence scores
-- **Risk Management**: Dynamic TP/SL based on ATR
+### 🤖 AI/ML Trading Intelligence
+- **Lag-Llama Forecaster**: Time series foundation model for price predictions
+- **LSTM Predictor**: Bidirectional LSTM with attention mechanism
+- **FinBERT Sentiment**: Financial news sentiment analysis
+- **Adaptive Learning**: Learns from trade history to improve decisions
 
-### 🤖 ML Layer (v2.0)
-- **LSTM Price Predictor**: Bidirectional LSTM with attention mechanism
-- **Sentiment Analysis**: FinBERT-powered news sentiment scoring
-- **DQN Trading Agent**: Reinforcement learning for trade decisions
-- **Feature Engineering**: 100+ features from OHLCV data
+### 📈 Advanced Trading
+- **200x Leverage Support**: Risk management optimized for high leverage
+- **Limit Orders**: Uses maker orders (0.02% fees vs 0.05% taker)
+- **Auto-Topup**: Prevents liquidation by adding margin automatically
+- **Trailing Stops**: Activates after 0.5% profit to lock in gains
+- **Trade Cooldown**: 60-second minimum between trades
 
-### 🌐 REST API (v2.0)
-- **FastAPI Server**: Production-ready REST endpoints
+### 📊 Technical Analysis
+- **Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
+- **Signal Validation**: ML confirms technical signals before entry
+- **Confidence Scores**: 0-100% confidence on every signal
+
+### 🌐 REST API Server
+- **FastAPI Server**: Production-ready endpoints
 - **WebSocket Streaming**: Real-time predictions
 - **Webhooks**: TradingView & Telegram integration
 
-## 📦 Installation
+---
+
+## 🚀 Quick Start
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/vishwamartur/delta_anti.git
 cd delta_anti
 
-# Install dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# For ML features (optional, requires more dependencies)
-pip install torch transformers scikit-learn
+# 3. Configure API credentials
+cp .env.example .env
+# Edit .env with your Delta Exchange API keys
+
+# 4. (Optional) Install Lag-Llama for AI forecasting
+python scripts/install_lag_llama.py
+
+# 5. Start trading
+python run_system.py
 ```
+
+---
 
 ## ⚙️ Configuration
 
-1. Copy `.env.example` to `.env`
-2. Add your Delta Exchange API credentials:
-   ```
-   DELTA_API_KEY=your_api_key
-   DELTA_API_SECRET=your_api_secret
-   ```
+### Environment Variables (`.env`)
 
-> ⚠️ Ensure your IP is whitelisted on Delta Exchange for API access.
+```env
+# Delta Exchange API
+DELTA_API_KEY=your_api_key
+DELTA_API_SECRET=your_api_secret
+DELTA_REST_URL=https://api.india.delta.exchange
+DELTA_WS_URL=wss://socket.india.delta.exchange
 
-## 🚀 Usage
+# Trading
+TRADING_SYMBOLS=BTCUSD,ETHUSD
+DEFAULT_TIMEFRAME=5m
+RISK_PER_TRADE=0.10          # 10% risk per trade
+DEFAULT_LEVERAGE=200
+AUTO_TOPUP=true
+AUTO_EXECUTION=true
 
-### Console Dashboard
-```bash
-python main.py
+# Trade Frequency
+MIN_TRADE_INTERVAL=60        # Seconds between trades
 ```
 
-### API Server
+### Key Settings Explained
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `RISK_PER_TRADE` | 0.10 | 10% of balance risked per trade |
+| `DEFAULT_LEVERAGE` | 200 | Leverage multiplier |
+| `AUTO_TOPUP` | true | Adds margin to prevent liquidation |
+| `MIN_TRADE_INTERVAL` | 60 | Cooldown between trades (seconds) |
+
+---
+
+## 🤖 AI/ML Models
+
+### 1. Lag-Llama (Foundation Model)
+Time series transformer trained on 100+ datasets.
+
 ```bash
-python -m api.server.main
+# Install (requires GPU, 4GB+ VRAM)
+python scripts/install_lag_llama.py
 ```
-Server runs at `http://localhost:8000`
-- Docs: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
 
-### API Endpoints
+**Logs:**
+```
+[LAG-LLAMA] BTCUSD: bullish (72%, +1.25%)
+```
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v2/predict` | POST | Get ML price predictions |
-| `/api/v2/signals/{symbol}` | GET | Get combined trading signals |
-| `/api/v2/sentiment/{symbol}` | GET | Get sentiment analysis |
-| `/api/v2/indicators/{symbol}` | GET | Get technical indicators |
-| `/api/v2/trades` | GET | Get open trades |
-| `/ws/predictions/{symbol}` | WebSocket | Stream predictions |
+### 2. LSTM Predictor
+Bidirectional LSTM with attention for price forecasting.
+
+### 3. FinBERT Sentiment
+Analyzes crypto news sentiment before trades.
+
+```
+[SENTIMENT] BTCUSD: bullish (score: 0.45)
+```
+
+### Model Fallback Chain
+```
+Lag-Llama → LSTM → Momentum → Technical Only
+```
+
+---
 
 ## 📁 Project Structure
 
 ```
 delta_anti/
-├── config.py                 # Configuration
-├── main.py                   # Console dashboard entry
-├── requirements.txt          # Dependencies
+├── run_system.py              # Main entry point
+├── config.py                  # Configuration
+├── .env                       # API credentials
 │
 ├── api/
-│   ├── delta_rest.py        # REST API client
-│   ├── delta_websocket.py   # WebSocket client
-│   ├── server/              # FastAPI server
-│   │   └── main.py
-│   └── webhooks/            # Webhook handlers
-│       └── tradingview.py
+│   ├── delta_rest.py          # REST API client
+│   ├── delta_websocket.py     # WebSocket client
+│   └── server/                # FastAPI server
 │
-├── ml/                       # Machine Learning
+├── ml/                        # Machine Learning
 │   ├── models/
-│   │   └── lstm_predictor.py
+│   │   ├── lstm_predictor.py      # LSTM model
+│   │   └── lag_llama_predictor.py # Lag-Llama model
 │   ├── features/
-│   │   └── feature_engineer.py
-│   ├── sentiment/
-│   │   └── market_sentiment.py
-│   └── agents/
-│       └── dqn_trader.py
+│   │   └── feature_engineer.py    # 100+ features
+│   └── sentiment/
+│       └── market_sentiment.py    # FinBERT
 │
-├── data/
-│   └── market_data.py
 ├── analysis/
-│   ├── indicators.py
-│   └── signals.py
+│   ├── indicators.py          # Technical indicators
+│   └── signals.py             # Signal generation + ML validation
+│
 ├── strategy/
-│   └── trade_manager.py
-└── ui/
-    └── dashboard.py
+│   ├── advanced_trade_manager.py  # Trade execution
+│   └── trade_analyzer.py          # Adaptive learning
+│
+├── scripts/
+│   └── install_lag_llama.py   # ML setup script
+│
+└── data/
+    └── trades.json            # Trade history
 ```
 
-## 📊 Technical Indicators
+---
 
-| Indicator | Description |
-|-----------|-------------|
-| RSI | Relative Strength Index (14-period) |
-| MACD | Moving Average Convergence Divergence |
-| Bollinger Bands | 20-period with 2 std dev |
-| ATR | Average True Range |
-| ADX | Average Directional Index |
-| EMA/SMA | Exponential & Simple Moving Averages |
+## 📊 Trading Dashboard
 
-## 🔗 API Documentation
+When running, you'll see:
 
-- [Delta Exchange API Docs](https://docs.delta.exchange/)
+```
+============================================================
+[LIVE ENTRY] BTCUSD SHORT @ $78,500.00
+  Order ID: 12345678
+----------------------------------------
+  Size:      1 contracts
+  Notional:  $78,500.00
+  Stop Loss: $79,128.00 (0.80% away)
+  Take Profit: $77,558.00 (1.20% away)
+  Risk/Reward: 1.5x
+  Est. Fees:   $31.40 (round-trip @ 0.04%)
+============================================================
+```
+
+---
+
+## 💰 Fee Optimization
+
+Uses **limit orders** to reduce fees:
+
+| Fee Type | Market Order | Limit Order | Savings |
+|----------|--------------|-------------|---------|
+| Entry | 0.05% | 0.02% | 60% |
+| Exit | 0.05% | 0.02% | 60% |
+| **Round-trip** | 0.10% | **0.04%** | **60%** |
+
+---
+
+## 🛡️ Risk Management
+
+1. **Daily Loss Limit**: 50% (configurable)
+2. **Max Drawdown**: 70%
+3. **Auto-Topup**: Uses wallet balance to prevent liquidation
+4. **Trailing Stop**: Activates after 0.5% profit
+5. **Trade Cooldown**: Prevents overtrading
+
+---
+
+## 🔌 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/trades/active` | GET | Get open trades |
+| `/api/trades/stats` | GET | Get trading statistics |
+| `/api/v2/predict` | POST | ML price predictions |
+| `/api/v2/signals/{symbol}` | GET | Trading signals |
+| `/api/v2/sentiment/{symbol}` | GET | Sentiment analysis |
+
+**API Docs**: `http://localhost:8000/docs`
+
+---
+
+## 📈 Performance Tracking
+
+Trade history saved to `data/trades.json`:
+
+```json
+{
+  "stats": {
+    "total_trades": 27,
+    "win_rate": 40.0,
+    "total_pnl": 125.50,
+    "account_balance": 505.50
+  }
+}
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### "Daily loss limit reached"
+```bash
+# Reset by restarting the bot
+python run_system.py
+```
+
+### GPU not detected for Lag-Llama
+```bash
+# Install PyTorch with CUDA
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
+### High fees
+- Ensure `order_type` is `"maker"` in config
+- Check that limit orders are being placed (see logs)
+
+---
 
 ## 📄 License
 
 MIT
+
+---
+
+## 🔗 Links
+
+- [Delta Exchange API Docs](https://docs.delta.exchange/)
+- [Lag-Llama Paper](https://arxiv.org/abs/2310.08278)
+- [FinBERT](https://huggingface.co/ProsusAI/finbert)
