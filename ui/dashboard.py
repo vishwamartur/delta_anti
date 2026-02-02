@@ -29,6 +29,7 @@ class Dashboard:
     def __init__(self):
         self.console = Console()
         self.last_update = datetime.now()
+        self._start_time = datetime.now()  # Track uptime
         
         # Store latest data
         self._prices: Dict[str, float] = {}
@@ -268,15 +269,33 @@ class Dashboard:
         
         self.last_update = datetime.now()
     
+    def _create_footer_panel(self) -> Panel:
+        """Create footer panel with system status."""
+        now = datetime.now().strftime("%H:%M:%S")
+        uptime = (datetime.now() - getattr(self, '_start_time', datetime.now())).seconds // 60
+        
+        content = Text()
+        content.append("System Status: ", style="dim")
+        content.append("RUNNING", style="bold green")
+        content.append(f"  |  Uptime: {uptime}m", style="dim")
+        content.append(f"  |  Last Update: {now}", style="dim")
+        content.append(f"  |  Symbols: {', '.join(config.TRADING_SYMBOLS)}", style="dim")
+        content.append("\n")
+        content.append("Press ", style="dim")
+        content.append("Ctrl+C", style="bold yellow")
+        content.append(" to stop", style="dim")
+        
+        return Panel(content, title="[SYSTEM]", box=box.ROUNDED, style="dim")
+    
     def render(self) -> Layout:
         """Render the complete dashboard layout."""
         layout = Layout()
         
-        # Main structure
+        # Main structure - removed footer, integrated messages into main
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main"),
-            Layout(name="footer", size=10)
+            Layout(name="footer", size=5)
         )
         
         # Main area split
@@ -307,6 +326,7 @@ class Dashboard:
         layout["stats"].update(self._create_stats_panel())
         layout["analysis"].update(self._create_signal_details_panel())
         layout["messages"].update(self._create_messages_panel())
+        layout["footer"].update(self._create_footer_panel())
         
         return layout
     

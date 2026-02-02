@@ -1,20 +1,32 @@
 """
 Market Sentiment Analysis
-Analyzes news and social media sentiment for trading signals
+Analyzes news and social media sentiment for trading signals.
+Now with Hugging Face Inference API fallback.
 """
+import os
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import re
+import logging
 
-# Try importing transformers for FinBERT
+logger = logging.getLogger(__name__)
+
+# Try importing transformers for local FinBERT
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print("[ML] Transformers not installed. Using simplified sentiment analysis.")
+    logger.info("[ML] Transformers not installed locally, will use HF Inference API")
+
+# Try importing HF Inference API client
+try:
+    from ml.hf_inference import get_hf_client
+    HF_API_AVAILABLE = True
+except ImportError:
+    HF_API_AVAILABLE = False
 
 
 @dataclass
@@ -142,9 +154,27 @@ class SentimentAnalyzer:
                     'neutral_pct': neutral / total
                 }
             except Exception as e:
-                print(f"[ML] FinBERT error: {e}")
+                logger.warning(f"[ML] FinBERT error: {e}")
         
-        # Fallback: Simple keyword-based sentiment
+        # Fallback 1: Use HF Inference API if available
+        if HF_API_AVAILABLE:
+            try:
+                hf_client = get_hf_client()
+                hf_result = hf_client.analyze_sentiment(texts)
+                if hf_result and hf_result.get('confidence', 0) > 0:
+                    logger.info(f"[HF API] Sentiment: {hf_result['direction']}")
+                    # Convert HF format to our format
+                    score = hf_result.get('score', 0) * 100
+                    return {
+                        'score': score,
+                        'positive_pct': 0.5 + score/200 if score > 0 else 0.3,
+                        'negative_pct': 0.5 - score/200 if score < 0 else 0.3,
+                        'neutral_pct': 0.4
+                    }
+            except Exception as e:
+                logger.debug(f"[HF API] Fallback error: {e}")
+        
+        # Fallback 2: Simple keyword-based sentiment
         return self._simple_sentiment(texts)
     
     def _simple_sentiment(self, texts: List[str]) -> Dict:
