@@ -24,6 +24,12 @@ try:
 except ImportError:
     SENTIMENT_AVAILABLE = False
 
+try:
+    from ml.models.lag_llama_predictor import get_lag_llama_predictor
+    LAG_LLAMA_AVAILABLE = True
+except ImportError:
+    LAG_LLAMA_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,25 +133,45 @@ class SignalGenerator:
     def _get_ml_prediction(self, symbol: str, df=None) -> Dict:
         """Get ML prediction for price direction and confidence.
         
+        Uses Lag-Llama (foundation model) if available, falls back to LSTM.
+        
         Returns:
             Dict with 'direction' ('bullish'/'bearish'), 'confidence' (0-100), 'change_pct'
         """
-        result = {'direction': 'neutral', 'confidence': 0, 'change_pct': 0.0}
+        result = {'direction': 'neutral', 'confidence': 0, 'change_pct': 0.0, 'model': 'none'}
         
-        if not ML_AVAILABLE:
+        if df is None:
             return result
-            
-        try:
-            if df is not None:
+        
+        # Try Lag-Llama first (more advanced foundation model)
+        if LAG_LLAMA_AVAILABLE:
+            try:
+                lag_llama = get_lag_llama_predictor()
+                signal = lag_llama.get_trading_signal(df, symbol)
+                if signal and signal.get('confidence', 0) > 0:
+                    result['direction'] = signal['direction']
+                    result['confidence'] = int(signal['confidence'] * 100)
+                    result['change_pct'] = signal.get('change_pct', 0)
+                    result['model'] = 'lag-llama'
+                    logger.info(f"[LAG-LLAMA] {symbol}: {result['direction']} "
+                               f"({result['confidence']}%, {result['change_pct']:+.2f}%)")
+                    return result
+            except Exception as e:
+                logger.debug(f"[LAG-LLAMA] Error, falling back to LSTM: {e}")
+        
+        # Fallback to LSTM predictor
+        if ML_AVAILABLE:
+            try:
                 prediction = lstm_predictor.predict(df)
                 if prediction:
                     result['direction'] = prediction.direction.lower()
                     result['confidence'] = int(prediction.confidence * 100)
                     result['change_pct'] = prediction.predicted_change_pct
-                    logger.info(f"[ML] LSTM prediction: {result['direction']} "
+                    result['model'] = 'lstm'
+                    logger.info(f"[LSTM] {symbol}: {result['direction']} "
                                f"({result['confidence']}%, {result['change_pct']:+.2f}%)")
-        except Exception as e:
-            logger.debug(f"[ML] Prediction error: {e}")
+            except Exception as e:
+                logger.debug(f"[LSTM] Prediction error: {e}")
             
         return result
     
