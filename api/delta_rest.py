@@ -44,6 +44,7 @@ class DeltaRestClient:
         """Make HTTP request to Delta Exchange API."""
         url = f"{self.base_url}{path}"
         
+        # Build query string WITH the ? prefix (required by Delta Exchange signature format)
         query_string = ""
         if params:
             query_string = "?" + "&".join([f"{k}={v}" for k, v in params.items()])

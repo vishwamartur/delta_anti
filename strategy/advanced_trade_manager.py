@@ -617,6 +617,76 @@ class AdvancedTradeManager:
             'account_balance': self.risk_manager.account_balance
         }
     
+    def check_market_conditions(self, symbol: str, indicators: IndicatorValues, 
+                                 direction: str) -> Tuple[bool, str]:
+        """
+        Pre-entry market condition check.
+        
+        Validates market is suitable for trading before entering position.
+        
+        Checks:
+        1. Volatility (ADX) - Avoid dead/choppy markets
+        2. Spread health - Avoid wide spreads
+        3. RSI extremes - Don't enter at exhaustion
+        4. Trend clarity - Ensure clear direction
+        
+        Args:
+            symbol: Trading symbol
+            indicators: Current indicator values
+            direction: 'LONG' or 'SHORT'
+            
+        Returns:
+            Tuple of (is_suitable, reason)
+        """
+        reasons = []
+        
+        # 1. VOLATILITY CHECK (ADX)
+        # ADX < 15 = dead/choppy market, not suitable for directional trades
+        # ADX > 50 = extreme volatility, higher risk
+        if indicators.adx is not None:
+            if indicators.adx < 15:
+                return False, f"Market too quiet (ADX={indicators.adx:.1f}<15) - wait for volatility"
+            if indicators.adx > 50:
+                reasons.append(f"High volatility (ADX={indicators.adx:.1f})")
+        
+        # 2. SPREAD CHECK (via BB width as proxy)
+        # Very tight BB = low volatility, potential squeeze incoming
+        bb_width = 0
+        if indicators.bb_upper and indicators.bb_lower and indicators.price > 0:
+            bb_width = ((indicators.bb_upper - indicators.bb_lower) / indicators.price) * 100
+            if bb_width < 0.3:  # Less than 0.3% width = very tight
+                return False, f"Bollinger squeeze (width={bb_width:.2f}%) - wait for breakout"
+        
+        # 3. RSI EXTREME CHECK - Don't enter into exhaustion
+        if indicators.rsi is not None:
+            if direction == 'LONG' and indicators.rsi > 75:
+                return False, f"RSI overbought ({indicators.rsi:.0f}>75) - avoid long entry"
+            if direction == 'SHORT' and indicators.rsi < 25:
+                return False, f"RSI oversold ({indicators.rsi:.0f}<25) - avoid short entry"
+        
+        # 4. TREND CLARITY CHECK - Ensure EMA alignment matches direction
+        if indicators.ema_9 and indicators.ema_21:
+            ema_bullish = indicators.ema_9 > indicators.ema_21
+            if direction == 'LONG' and not ema_bullish:
+                reasons.append("EMA bearish (counter-trend trade)")
+            elif direction == 'SHORT' and ema_bullish:
+                reasons.append("EMA bullish (counter-trend trade)")
+        
+        # 5. MACD CONFIRMATION - Check for divergence
+        if indicators.macd_histogram is not None:
+            if direction == 'LONG' and indicators.macd_histogram < 0:
+                reasons.append("MACD histogram negative")
+            elif direction == 'SHORT' and indicators.macd_histogram > 0:
+                reasons.append("MACD histogram positive")
+        
+        # Allow trade with warnings if not blocked
+        if reasons:
+            logger.info(f"[MARKET] {symbol} {direction}: Warnings - {', '.join(reasons)}")
+        else:
+            logger.info(f"[MARKET] {symbol} {direction}: Conditions favorable (ADX={indicators.adx:.1f})")
+        
+        return True, "Market conditions acceptable"
+    
     def create_trade_from_signal(self, signal, indicators: IndicatorValues) -> Optional[Trade]:
         """Create trade from signal generator output"""
         
@@ -635,12 +705,20 @@ class AdvancedTradeManager:
                 logger.info(f"[COOLDOWN] Trade frequency limit - wait {remaining:.0f}s")
                 return None
         
-        # Generate trade ID
-        trade_id = f"T{int(datetime.now().timestamp() * 1000)}"
-        
-        # Determine direction
+        # Determine direction early for market check
         signal_type = signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type)
         direction = TradeDirection.LONG if 'LONG' in signal_type.upper() else TradeDirection.SHORT
+        
+        # CHECK MARKET CONDITIONS before entering
+        market_ok, market_reason = self.check_market_conditions(
+            signal.symbol, indicators, direction.value
+        )
+        if not market_ok:
+            logger.warning(f"[MARKET] Trade blocked: {market_reason}")
+            return None
+        
+        # Generate trade ID
+        trade_id = f"T{int(datetime.now().timestamp() * 1000)}"
         
         # Get entry price and ATR
         entry_price = signal.entry_price
@@ -920,7 +998,13 @@ class AdvancedTradeManager:
     
     def _update_trailing_stop(self, trade: Trade):
         """Update trailing stop loss based on favorable price movement.
-        ONLY activates after trade is at least 0.5% in profit to prevent immediate exits.
+        
+        DYNAMIC TRAILING: Tightens as profit increases to lock in more gains.
+        - 0.3-0.8% profit: 0.8% trail (base)
+        - 0.8-1.5% profit: 0.5% trail (tighter)
+        - >1.5% profit: 0.3% trail (very tight to lock in)
+        
+        ONLY activates after trade is at least 0.3% in profit.
         """
         
         # Calculate current profit percentage
@@ -932,28 +1016,45 @@ class AdvancedTradeManager:
         else:
             profit_pct = ((trade.entry_price - trade.current_price) / trade.entry_price) * 100
         
-        # Only activate trailing stop after minimum profit (0.5%)
-        min_profit_for_trailing = 0.5
+        # Only activate trailing stop after minimum profit (0.3%)
+        min_profit_for_trailing = 0.3
         if profit_pct < min_profit_for_trailing:
             return  # Don't trail until we have some profit
         
+        # DYNAMIC TRAIL: Tighten as profit grows (lock in more gains)
+        if profit_pct >= 1.5:
+            trail_pct = 0.3  # Very tight - lock in most profit
+        elif profit_pct >= 0.8:
+            trail_pct = 0.5  # Moderate - balance between profit and breathing room
+        else:
+            trail_pct = trade.trailing_stop_pct  # Use config default (0.8%)
+        
         if trade.is_long:
             # For long positions, trail stop up
-            new_stop = trade.current_price * (1 - trade.trailing_stop_pct / 100)
+            new_stop = trade.current_price * (1 - trail_pct / 100)
             if trade.trailing_stop_price is None or new_stop > trade.trailing_stop_price:
                 if new_stop > trade.stop_loss:  # Must be better than original SL
                     trade.trailing_stop_price = new_stop
-                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} (profit: {profit_pct:.2f}%)")
+                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} "
+                               f"(profit: {profit_pct:.2f}%, trail: {trail_pct}%)")
         else:
             # For short positions, trail stop down
-            new_stop = trade.current_price * (1 + trade.trailing_stop_pct / 100)
+            new_stop = trade.current_price * (1 + trail_pct / 100)
             if trade.trailing_stop_price is None or new_stop < trade.trailing_stop_price:
                 if new_stop < trade.stop_loss:  # Must be better than original SL
                     trade.trailing_stop_price = new_stop
-                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} (profit: {profit_pct:.2f}%)")
+                    logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} "
+                               f"(profit: {profit_pct:.2f}%, trail: {trail_pct}%)")
     
     def check_exit_conditions(self, trade_id: str) -> Optional[ExitReason]:
-        """Check if trade should be exited"""
+        """Check if trade should be exited.
+        
+        Exit checks in priority order:
+        1. Trailing stop (lock in profits)
+        2. Regular stop loss
+        3. Take profit
+        4. Time-based exit (stagnant trades)
+        """
         
         trade = self.trades.get(trade_id)
         if not trade or trade.state != TradeState.ACTIVE:
@@ -983,6 +1084,23 @@ class AdvancedTradeManager:
                 return ExitReason.TAKE_PROFIT
             elif trade.is_short and current_price <= trade.take_profit:
                 return ExitReason.TAKE_PROFIT
+        
+        # TIME-BASED EXIT: Close stagnant trades to free capital
+        # Exit if trade hasn't reached 0.3% profit within 5 minutes
+        if trade.entry_time and trade.entry_price > 0:
+            duration_min = trade.duration_minutes
+            
+            # Calculate current profit %
+            if trade.is_long:
+                profit_pct = ((current_price - trade.entry_price) / trade.entry_price) * 100
+            else:
+                profit_pct = ((trade.entry_price - current_price) / trade.entry_price) * 100
+            
+            # Stagnant trade: > 5 min and < 0.3% profit (or slightly negative)
+            if duration_min >= 5 and profit_pct < 0.3 and profit_pct > -0.2:
+                logger.info(f"[TIME_EXIT] {trade.trade_id} stagnant for {duration_min}m "
+                           f"with only {profit_pct:.2f}% profit - freeing capital")
+                return ExitReason.TIME_EXIT
         
         return None
     

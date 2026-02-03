@@ -82,16 +82,15 @@ WS_CHANNELS = {
     "mark_price": "mark_price"
 }
 
-# Signal Configuration
+# Signal Configuration - OPTIMIZED FOR HIGH WIN RATE
 SIGNAL_CONFIG = {
-    "min_confidence": 55,  # Lower threshold for more trades
+    "min_confidence": 65,  # Higher threshold for quality trades (was 55)
     "confirm_candles": 1,   # Quick entry
-    # PROFIT TARGET: $1 per $100 (1% return)
-    # With 200x leverage: 0.005% price move = 1% account return
-    # Using tight TP for quick, consistent profits
-    "atr_multiplier_tp": 0.4,  # Tight TP (~0.5% move = 100% at 200x = 1% account)
-    "atr_multiplier_sl": 0.6,  # SL slightly wider than TP
-    "min_profit_target_pct": 1.0,  # Minimum 1% account return per trade
+    # PROFIT TARGET: Conservative 1:1 R:R for higher win rate
+    # Equal TP/SL means we just need >50% win rate to profit
+    "atr_multiplier_tp": 0.5,  # Take profit at 0.5x ATR (was 0.4)
+    "atr_multiplier_sl": 0.5,  # Stop loss at 0.5x ATR (was 0.6) - equal R:R
+    "min_profit_target_pct": 0.5,  # Minimum 0.5% account return per trade
 }
 
 # Adaptive Trading Configuration (learns from trade history)
@@ -163,7 +162,7 @@ TRADE_MANAGER_CONFIG = {
     'max_positions': int(os.getenv("MAX_POSITIONS", "10")),  # Increased to 10
     'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.50")),  # 50% daily loss limit (raised for testing)
     'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.70")),  # 70% max drawdown (from peak)
-    'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "1.5")),  # 1.5%
+    'trailing_stop_pct': float(os.getenv("TRAILING_STOP_PCT", "0.8")),  # 0.8% (was 1.5% - tighter for high win rate)
     'strategy_name': 'delta_anti_v1',
     # Fee structure
     'maker_fee_pct': TRADING_FEES['maker_fee_pct'],
