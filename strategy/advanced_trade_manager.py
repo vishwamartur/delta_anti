@@ -999,12 +999,12 @@ class AdvancedTradeManager:
     def _update_trailing_stop(self, trade: Trade):
         """Update trailing stop loss based on favorable price movement.
         
-        DYNAMIC TRAILING: Tightens as profit increases to lock in more gains.
-        - 0.3-0.8% profit: 0.8% trail (base)
-        - 0.8-1.5% profit: 0.5% trail (tighter)
-        - >1.5% profit: 0.3% trail (very tight to lock in)
+        DYNAMIC TRAILING (Aggressive Mode - Let Winners Run):
+        - 0.5-1.0% profit: 1.2% trail (loose - give room)
+        - 1.0-2.0% profit: 0.8% trail (moderate)
+        - >2.0% profit: 0.5% trail (lock in big gains)
         
-        ONLY activates after trade is at least 0.3% in profit.
+        ONLY activates after trade is at least 0.5% in profit.
         """
         
         # Calculate current profit percentage
@@ -1016,18 +1016,18 @@ class AdvancedTradeManager:
         else:
             profit_pct = ((trade.entry_price - trade.current_price) / trade.entry_price) * 100
         
-        # Only activate trailing stop after minimum profit (0.3%)
-        min_profit_for_trailing = 0.3
+        # Only activate trailing stop after minimum profit (0.5% for aggressive)
+        min_profit_for_trailing = 0.5
         if profit_pct < min_profit_for_trailing:
-            return  # Don't trail until we have some profit
+            return  # Don't trail until we have solid profit
         
-        # DYNAMIC TRAIL: Tighten as profit grows (lock in more gains)
-        if profit_pct >= 1.5:
-            trail_pct = 0.3  # Very tight - lock in most profit
-        elif profit_pct >= 0.8:
-            trail_pct = 0.5  # Moderate - balance between profit and breathing room
+        # DYNAMIC TRAIL: Looser trails to let winners run (aggressive mode)
+        if profit_pct >= 2.0:
+            trail_pct = 0.5  # Lock in big gains
+        elif profit_pct >= 1.0:
+            trail_pct = 0.8  # Moderate trail
         else:
-            trail_pct = trade.trailing_stop_pct  # Use config default (0.8%)
+            trail_pct = trade.trailing_stop_pct  # Use config default (1.2%)
         
         if trade.is_long:
             # For long positions, trail stop up

@@ -70,7 +70,7 @@ class TradeHistoryAnalyzer:
         # Config
         self.min_historical_trades = 5  # Need at least N trades to make decisions
         self.min_win_rate_threshold = 30  # Block combos with <30% win rate
-        self.min_confidence_default = 70  # Raised from 60
+        self.min_confidence_default = 80  # STRICT: Only 80%+ confidence trades
         
         # Load and analyze on init
         self._load_and_analyze()
