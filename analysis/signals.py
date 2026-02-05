@@ -45,6 +45,13 @@ except ImportError:
     MARKET_ANALYZER_AVAILABLE = False
     MarketCondition = None
 
+# Smart Money Concepts
+try:
+    from analysis.smart_money import smart_money_analyzer
+    SMC_AVAILABLE = True
+except ImportError:
+    SMC_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -487,12 +494,40 @@ class SignalGenerator:
                 take_profit=0,
                 timestamp=datetime.now(),
                 reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
+                reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
                 indicators=indicators
             )
         
         # Apply ML confidence boost
         confidence = min(100, confidence + ml_boost)
         reasons.extend(ml_reasons)
+        
+        # === SMC VALIDATION: Check for Institutional Setups ===
+        if SMC_AVAILABLE and df is not None:
+            try:
+                smc_analysis = smart_money_analyzer.analyze(df)
+                
+                # Check for SMC confirmations
+                if is_long and smc_analysis.signal_direction == "bullish":
+                    confidence = min(100, confidence + 15)
+                    reasons.append(f"SMC: {smc_analysis.signal_reason}")
+                elif not is_long and smc_analysis.signal_direction == "bearish":
+                    confidence = min(100, confidence + 15)
+                    reasons.append(f"SMC: {smc_analysis.signal_reason}")
+                
+                # Check for Liquidity Grabs (Strong Reversal Signal)
+                for sweep in smc_analysis.liquidity_sweeps:
+                    if is_long and sweep.direction == "bullish":
+                         # Sweep of lows -> Bullish
+                         confidence = min(100, confidence + 20)
+                         reasons.append("SMC: Liquidity Grab (Lows swept)")
+                    elif not is_long and sweep.direction == "bearish":
+                         # Sweep of highs -> Bearish
+                         confidence = min(100, confidence + 20)
+                         reasons.append("SMC: Liquidity Grab (Highs swept)")
+                         
+            except Exception as e:
+                logger.warning(f"[SMC] Analysis failed: {e}")
         
         # === PRE-TRADE MARKET ANALYSIS ===
         market_condition = None

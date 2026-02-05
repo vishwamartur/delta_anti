@@ -146,7 +146,7 @@ class LagLlamaPredictor:
             self.model_path = self._download_model()
             
             # Load checkpoint
-            ckpt = torch.load(self.model_path, map_location=self.device)
+            ckpt = torch.load(self.model_path, map_location=self.device, weights_only=False)
             
             # Extract model configuration
             model_kwargs = ckpt.get("hyper_parameters", {}).get("model_kwargs", {})
@@ -303,7 +303,7 @@ class LagLlamaPredictor:
         current_price = float(prices[-1])
         
         # Simple momentum: average of recent returns
-        returns = np.diff(prices[-20:]) / prices[-21:-1]
+        returns = np.diff(prices[-21:]) / prices[-21:-1]
         avg_return = np.mean(returns)
         std_return = np.std(returns)
         

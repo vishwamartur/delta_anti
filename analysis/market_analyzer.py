@@ -399,6 +399,13 @@ class MarketAnalyzer:
         Returns:
             MarketCondition with full analysis results
         """
+        # Smart Money Concepts
+        try:
+            from analysis.smart_money import smart_money_analyzer
+            SMC_AVAILABLE = True
+        except ImportError:
+            SMC_AVAILABLE = False
+        
         condition = MarketCondition(
             symbol=symbol,
             timestamp=datetime.now()
@@ -434,6 +441,26 @@ class MarketAnalyzer:
             
             # 3. Find support/resistance levels
             condition.support_levels, condition.resistance_levels = self._find_support_resistance(df)
+            
+            # SMC Integration: Add Order Blocks to S/R
+            if SMC_AVAILABLE:
+                try:
+                    smc = smart_money_analyzer.analyze(df)
+                    # Add Bullish OBs/FVGs to support
+                    for zone in smc.order_blocks + smc.fvgs:
+                        if zone.direction == "bullish":
+                            condition.support_levels.append(zone.price_high) # Top of demand zone
+                        elif zone.direction == "bearish":
+                            condition.resistance_levels.append(zone.price_low) # Bottom of supply zone
+                    
+                    # Re-sort and limit
+                    condition.support_levels = sorted(list(set(condition.support_levels)), reverse=True)[:5]
+                    condition.resistance_levels = sorted(list(set(condition.resistance_levels)))[:5]
+                    
+                    if smc.signal_direction != "neutral":
+                         condition.analysis_reasons.append(f"SMC: {smc.signal_direction}")
+                except Exception as e:
+                    logger.warning(f"[MARKET] SMC error: {e}")
             
             # 4. Calculate structure quality
             condition.structure_quality = self._calculate_structure_quality(
