@@ -111,6 +111,14 @@ MARKET_ANALYSIS_CONFIG = {
     "sr_lookback_periods": 50,          # Periods for support/resistance detection
     "min_rr_ratio": 1.5,                # Minimum risk/reward ratio
     "use_ai_confirmation": True,        # Require AI model agreement
+    # Noise filter settings
+    "noise_filter": {
+        "noise_threshold": 60,          # Block signals above this noise score
+        "atr_spike_threshold": 2.0,     # ATR ratio > 2x = volatility spike
+        "min_body_ratio": 0.3,          # Candle body must be 30% of range
+        "volume_z_threshold": 2.5,      # Volume z-score threshold
+        "max_direction_changes": 4,     # Max reversals in last 10 candles
+    }
 }
 
 # Display Settings

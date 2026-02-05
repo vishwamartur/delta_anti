@@ -33,6 +33,13 @@ A **production-ready** quantitative trading system for Delta Exchange with **AI/
 - **Position Tracking**: Open positions with P&L display
 - **System Messages**: Trade alerts and status updates
 
+### 🛡️ Pre-Trade Market Analysis (NEW)
+- **Market Regime Detection**: AI-driven identification of trending, ranging, or volatile markets
+- **Noise Filtering**: Advanced noise cancellation (volatility spikes, false breakouts, whipsaws)
+- **Structure Analysis**: Automatic support/resistance detection and structure quality scoring
+- **Trade Quality Score**: Composite 0-100 score for every trade opportunity
+- **Risk-Reward Validation**: Ensures optimal risk/reward ratios before entry
+
 ### 🌐 REST API Server
 - **FastAPI Server**: Production-ready endpoints
 - **WebSocket Streaming**: Real-time predictions
@@ -100,6 +107,7 @@ MIN_TRADE_INTERVAL=60        # Seconds between trades
 | `AUTO_TOPUP` | true | Adds margin to prevent liquidation |
 | `MIN_TRADE_INTERVAL` | 60 | Cooldown between trades (seconds) |
 | `HF_TOKEN` | - | Hugging Face API token for cloud inference |
+| `MARKET_ANALYSIS_CONFIG` | Enabled | Pre-trade validation settings |
 
 ---
 
@@ -252,6 +260,33 @@ Rich terminal dashboard using the `rich` library:
   Risk/Reward: 1.5x
   Est. Fees:   $31.40 (round-trip @ 0.04%)
 ============================================================
+```
+
+---
+
+## 🔬 Pre-Trade Market Analysis
+
+The system performs a comprehensive health check before every trade:
+
+### 1. Market Analyzer
+Evaluates 4 key dimensions to generate a **Trade Quality Score (0-100)**:
+- **Trend Confidence**: Multi-indicator agreement (EMA, MACD, RSI, ADX)
+- **Structure Quality**: Clarity of support/resistance levels
+- **Risk/Reward**: Potential profit vs. risk logic
+- **Regime Alignment**: Is the strategy suitable for current conditions?
+
+### 2. Smart Noise Filter
+Prevents entering trades during chaotic market conditions by detecting:
+- **Volatility Spikes**: Abnormal ATR expansion
+- **False Breakouts**: Price failing to hold new levels
+- **Volume Anomalies**: Suspicious volume without price movement
+- **Choppy Action**: High wick-to-body ratio candles
+
+```
+[MARKET] BTCUSD: trending_up (Confidence: 85%)
+  Structure: Strong Support @ $78,200
+  Quality Score: 92/100
+  Action: GO (Long)
 ```
 
 ---

@@ -69,6 +69,9 @@ class MarketCondition:
     block_reason: str = ""
     analysis_reasons: List[str] = field(default_factory=list)
     
+    # Noise analysis
+    noise_analysis: Optional['NoiseAnalysis'] = None
+    
     def to_dict(self) -> Dict:
         """Serialize to dictionary."""
         return {
@@ -85,6 +88,267 @@ class MarketCondition:
             "should_enter": self.should_enter,
             "block_reason": self.block_reason,
         }
+
+
+@dataclass
+class NoiseAnalysis:
+    """
+    Noise analysis results for filtering false signals.
+    """
+    is_noisy: bool = False
+    noise_score: int = 0  # 0-100 (higher = more noise)
+    
+    # Noise factors
+    volatility_spike: bool = False
+    false_breakout_detected: bool = False
+    volume_anomaly: bool = False
+    choppy_price_action: bool = False
+    whipsaw_detected: bool = False
+    
+    # Filtering recommendations
+    should_filter: bool = False
+    filter_reason: str = ""
+    confidence_penalty: int = 0  # Reduce signal confidence by this amount
+    
+    # Metrics
+    avg_true_range_ratio: float = 1.0  # Current ATR vs historical avg
+    price_noise_ratio: float = 0.0  # Wick-to-body ratio
+    volume_z_score: float = 0.0  # Volume deviation from mean
+    direction_changes: int = 0  # Number of direction changes in recent candles
+
+
+class NoiseFilter:
+    """
+    Market noise detection and filtering.
+    
+    Filters out:
+    1. High volatility spikes (abnormal ATR)
+    2. False breakouts (quick reversals from S/R)
+    3. Volume anomalies (unusual volume without follow-through)
+    4. Choppy/sideways price action
+    5. Whipsaw patterns (rapid direction changes)
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            "noise_threshold": 60,           # Block signals above this noise score
+            "atr_spike_threshold": 2.0,      # ATR ratio > 2x = volatility spike
+            "min_body_ratio": 0.3,           # Candle body must be 30% of range
+            "volume_z_threshold": 2.5,       # Volume z-score threshold
+            "max_direction_changes": 4,      # Max reversals in last 10 candles
+            "breakout_confirm_candles": 2,   # Candles to confirm breakout
+        }
+    
+    def analyze_noise(
+        self, 
+        df: pd.DataFrame, 
+        indicators: 'IndicatorValues'
+    ) -> NoiseAnalysis:
+        """
+        Comprehensive noise analysis of market data.
+        
+        Args:
+            df: OHLCV DataFrame
+            indicators: Pre-calculated indicators
+            
+        Returns:
+            NoiseAnalysis with detection results
+        """
+        analysis = NoiseAnalysis()
+        
+        if df is None or len(df) < 20:
+            return analysis
+        
+        noise_factors = []
+        
+        # 1. Volatility spike detection
+        atr_ratio = self._detect_volatility_spike(df, indicators)
+        analysis.avg_true_range_ratio = atr_ratio
+        if atr_ratio > self.config['atr_spike_threshold']:
+            analysis.volatility_spike = True
+            noise_factors.append(("Volatility spike", 25))
+        
+        # 2. Price noise ratio (wick vs body)
+        price_noise = self._calculate_price_noise(df)
+        analysis.price_noise_ratio = price_noise
+        if price_noise > 0.7:  # 70%+ wick = high noise
+            analysis.choppy_price_action = True
+            noise_factors.append(("Choppy candles", 20))
+        
+        # 3. Volume anomaly detection
+        volume_z = self._detect_volume_anomaly(df)
+        analysis.volume_z_score = volume_z
+        if abs(volume_z) > self.config['volume_z_threshold']:
+            analysis.volume_anomaly = True
+            noise_factors.append(("Volume anomaly", 15))
+        
+        # 4. Whipsaw / direction change detection
+        dir_changes = self._count_direction_changes(df)
+        analysis.direction_changes = dir_changes
+        if dir_changes > self.config['max_direction_changes']:
+            analysis.whipsaw_detected = True
+            noise_factors.append(("Whipsaw pattern", 25))
+        
+        # 5. False breakout detection
+        false_breakout = self._detect_false_breakout(df, indicators)
+        if false_breakout:
+            analysis.false_breakout_detected = True
+            noise_factors.append(("False breakout", 30))
+        
+        # Calculate total noise score
+        analysis.noise_score = min(100, sum(score for _, score in noise_factors))
+        
+        # Determine if signal should be filtered
+        if analysis.noise_score >= self.config['noise_threshold']:
+            analysis.is_noisy = True
+            analysis.should_filter = True
+            reasons = [name for name, _ in noise_factors]
+            analysis.filter_reason = ", ".join(reasons[:2])
+            analysis.confidence_penalty = min(40, analysis.noise_score // 2)
+        elif analysis.noise_score >= 40:
+            # Moderate noise - don't filter but penalize confidence
+            analysis.is_noisy = True
+            analysis.confidence_penalty = analysis.noise_score // 3
+        
+        return analysis
+    
+    def _detect_volatility_spike(
+        self, 
+        df: pd.DataFrame, 
+        indicators: 'IndicatorValues'
+    ) -> float:
+        """
+        Detect if current volatility is abnormally high.
+        Returns ratio of current ATR to historical average.
+        """
+        if len(df) < 30:
+            return 1.0
+        
+        # Calculate historical ATR (last 30 candles, excluding recent 5)
+        high = df['high'].iloc[-30:-5]
+        low = df['low'].iloc[-30:-5]
+        close = df['close'].iloc[-30:-5]
+        
+        tr = pd.concat([
+            high - low,
+            abs(high - close.shift(1)),
+            abs(low - close.shift(1))
+        ], axis=1).max(axis=1)
+        
+        historical_atr = tr.mean()
+        current_atr = indicators.atr if indicators.atr > 0 else historical_atr
+        
+        if historical_atr > 0:
+            return current_atr / historical_atr
+        return 1.0
+    
+    def _calculate_price_noise(self, df: pd.DataFrame, lookback: int = 10) -> float:
+        """
+        Calculate price noise ratio based on wick-to-body ratios.
+        Higher ratio = more indecision/noise.
+        """
+        recent = df.iloc[-lookback:]
+        
+        noise_ratios = []
+        for _, candle in recent.iterrows():
+            body = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            
+            if total_range > 0:
+                body_ratio = body / total_range
+                noise_ratios.append(1 - body_ratio)  # Wick ratio
+        
+        return np.mean(noise_ratios) if noise_ratios else 0.5
+    
+    def _detect_volume_anomaly(self, df: pd.DataFrame, lookback: int = 20) -> float:
+        """
+        Detect volume anomalies using z-score.
+        Returns z-score of current volume vs historical.
+        """
+        if len(df) < lookback + 1:
+            return 0.0
+        
+        historical_vol = df['volume'].iloc[-lookback-1:-1]
+        current_vol = df['volume'].iloc[-1]
+        
+        mean_vol = historical_vol.mean()
+        std_vol = historical_vol.std()
+        
+        if std_vol > 0:
+            return (current_vol - mean_vol) / std_vol
+        return 0.0
+    
+    def _count_direction_changes(self, df: pd.DataFrame, lookback: int = 10) -> int:
+        """
+        Count number of direction changes in recent candles.
+        More changes = more choppy/noisy market.
+        """
+        if len(df) < lookback + 1:
+            return 0
+        
+        recent = df.iloc[-lookback:]
+        changes = 0
+        
+        for i in range(1, len(recent)):
+            prev_dir = recent['close'].iloc[i-1] > recent['open'].iloc[i-1]
+            curr_dir = recent['close'].iloc[i] > recent['open'].iloc[i]
+            
+            if prev_dir != curr_dir:
+                changes += 1
+        
+        return changes
+    
+    def _detect_false_breakout(
+        self, 
+        df: pd.DataFrame, 
+        indicators: 'IndicatorValues'
+    ) -> bool:
+        """
+        Detect if recent price action shows a false breakout pattern.
+        (Price broke level then quickly reversed)
+        """
+        if len(df) < 10:
+            return False
+        
+        recent = df.iloc[-5:]
+        
+        # Check for break and reverse pattern
+        lookback = df.iloc[-20:-5]
+        recent_high = lookback['high'].max()
+        recent_low = lookback['low'].min()
+        
+        # Check if price broke above then fell back
+        for i in range(len(recent) - 1):
+            if recent['high'].iloc[i] > recent_high:  # Broke above
+                if recent['close'].iloc[-1] < recent_high:  # Now below
+                    return True
+        
+        # Check if price broke below then recovered
+        for i in range(len(recent) - 1):
+            if recent['low'].iloc[i] < recent_low:  # Broke below
+                if recent['close'].iloc[-1] > recent_low:  # Now above
+                    return True
+        
+        return False
+    
+    def filter_signal(
+        self, 
+        noise_analysis: NoiseAnalysis,
+        signal_confidence: int
+    ) -> Tuple[bool, int, str]:
+        """
+        Apply noise filter to a signal.
+        
+        Returns:
+            Tuple of (should_proceed, adjusted_confidence, filter_reason)
+        """
+        if noise_analysis.should_filter:
+            return False, 0, noise_analysis.filter_reason
+        
+        # Apply confidence penalty
+        adjusted_confidence = max(0, signal_confidence - noise_analysis.confidence_penalty)
+        
+        return True, adjusted_confidence, ""
 
 
 class MarketAnalyzer:
@@ -108,6 +372,9 @@ class MarketAnalyzer:
             "min_rr_ratio": 1.5,
             "use_ai_confirmation": True,
         })
+        
+        # Noise filter
+        self._noise_filter = NoiseFilter(self.config.get('noise_filter', None))
         
         # ML components (lazy loaded)
         self._ml_predictor = None
@@ -147,7 +414,20 @@ class MarketAnalyzer:
             condition.regime, condition.regime_confidence = self._detect_regime(indicators, df)
             condition.analysis_reasons.append(f"Regime: {condition.regime.value} ({condition.regime_confidence:.0f}%)")
             
-            # 2. Calculate trend confidence
+            # 2. NOISE FILTER: Analyze and filter market noise
+            condition.noise_analysis = self._noise_filter.analyze_noise(df, indicators)
+            if condition.noise_analysis.should_filter:
+                condition.should_enter = False
+                condition.block_reason = f"NOISE: {condition.noise_analysis.filter_reason}"
+                logger.info(f"[NOISE] {symbol}: Filtered - {condition.noise_analysis.filter_reason} "
+                           f"(score={condition.noise_analysis.noise_score})")
+                return condition
+            elif condition.noise_analysis.is_noisy:
+                # Moderate noise - apply confidence penalty
+                condition.confidence_adjustment -= condition.noise_analysis.confidence_penalty
+                condition.analysis_reasons.append(f"Noise penalty: -{condition.noise_analysis.confidence_penalty}")
+            
+            # 3. Calculate trend confidence
             condition.trend_direction, condition.trend_confidence = self._calculate_trend_confidence(indicators, df)
             condition.trend_strength = indicators.adx
             condition.analysis_reasons.append(f"Trend: {condition.trend_direction} ({condition.trend_confidence}%)")
