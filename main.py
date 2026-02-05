@@ -91,7 +91,7 @@ class TradingSystem:
         
         # Generate entry signals if no position
         if not trade_manager.has_open_position(symbol):
-            signal = signal_generator.generate_signal(symbol, ind)
+            signal = signal_generator.generate_signal(symbol, ind, df)
             self._signals[symbol] = signal
             
             if signal.is_actionable():

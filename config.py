@@ -103,6 +103,16 @@ ADAPTIVE_TRADING_CONFIG = {
     "refresh_interval_minutes": 30,     # How often to re-analyze history
 }
 
+# Pre-Trade Market Analysis Configuration
+MARKET_ANALYSIS_CONFIG = {
+    "enabled": True,                    # Enable/disable market analysis
+    "min_trade_quality": 60,            # Minimum quality score to trade (0-100)
+    "min_trend_confidence": 50,         # Minimum trend confidence for trend trades
+    "sr_lookback_periods": 50,          # Periods for support/resistance detection
+    "min_rr_ratio": 1.5,                # Minimum risk/reward ratio
+    "use_ai_confirmation": True,        # Require AI model agreement
+}
+
 # Display Settings
 REFRESH_RATE = 1  # Seconds between dashboard updates
 CANDLE_HISTORY_SIZE = 100  # Number of candles to keep in memory

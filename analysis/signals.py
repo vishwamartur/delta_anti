@@ -37,6 +37,14 @@ try:
 except ImportError:
     RANGE_STRATEGY_AVAILABLE = False
 
+# Pre-trade market analysis
+try:
+    from analysis.market_analyzer import get_market_analyzer, MarketCondition
+    MARKET_ANALYZER_AVAILABLE = True
+except ImportError:
+    MARKET_ANALYZER_AVAILABLE = False
+    MarketCondition = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,6 +77,8 @@ class TradeSignal:
     timestamp: datetime
     reasons: List[str] = field(default_factory=list)
     indicators: Optional[IndicatorValues] = None
+    market_condition: Optional['MarketCondition'] = None
+    trade_quality: int = 0
     
     def is_actionable(self) -> bool:
         """Check if signal meets minimum confidence threshold."""
@@ -93,7 +103,9 @@ class SignalGenerator:
         self.config = config.SIGNAL_CONFIG
         self.rsi_config = config.INDICATOR_CONFIG['rsi']
         self.adaptive_config = config.ADAPTIVE_TRADING_CONFIG
+        self.market_config = getattr(config, 'MARKET_ANALYSIS_CONFIG', {'enabled': True})
         self._analyzer = None  # Lazy load
+        self._market_analyzer = None  # Lazy load
         
     @property
     def analyzer(self):
@@ -106,6 +118,18 @@ class SignalGenerator:
             except ImportError as e:
                 logger.warning(f"[ADAPTIVE] Could not load analyzer: {e}")
         return self._analyzer
+    
+    @property
+    def market_analyzer(self):
+        """Lazy load market analyzer to avoid circular imports"""
+        if self._market_analyzer is None and MARKET_ANALYZER_AVAILABLE:
+            if self.market_config.get('enabled', True):
+                try:
+                    self._market_analyzer = get_market_analyzer()
+                    logger.info("[MARKET] MarketAnalyzer loaded")
+                except Exception as e:
+                    logger.warning(f"[MARKET] Could not load analyzer: {e}")
+        return self._market_analyzer
         
     def _calculate_confidence(self, scores: List[int]) -> int:
         """Calculate overall confidence from individual scores."""
@@ -354,13 +378,15 @@ class SignalGenerator:
         return self._calculate_confidence(scores) if scores else 0, reasons
     
     def generate_signal(self, symbol: str, 
-                        indicators: IndicatorValues) -> TradeSignal:
+                        indicators: IndicatorValues,
+                        df: 'pd.DataFrame' = None) -> TradeSignal:
         """
         Generate trading signal based on technical indicators.
         
         Args:
             symbol: Trading symbol
             indicators: Calculated indicator values
+            df: Optional OHLCV DataFrame for enhanced market analysis
             
         Returns:
             TradeSignal with recommendations
@@ -468,9 +494,64 @@ class SignalGenerator:
         confidence = min(100, confidence + ml_boost)
         reasons.extend(ml_reasons)
         
-        # Calculate SL and TP
-        stop_loss = self._get_stop_loss(entry_price, atr, is_long)
-        take_profit = self._get_take_profit(entry_price, atr, is_long)
+        # === PRE-TRADE MARKET ANALYSIS ===
+        market_condition = None
+        trade_quality = 0
+        
+        if df is not None and self.market_analyzer:
+            direction = "LONG" if is_long else "SHORT"
+            market_condition = self.market_analyzer.analyze_market(symbol, df, indicators, direction)
+            trade_quality = market_condition.trade_quality_score
+            
+            if not market_condition.should_enter:
+                logger.info(f"[MARKET] BLOCKED {symbol} {direction}: {market_condition.block_reason}")
+                return TradeSignal(
+                    symbol=symbol,
+                    signal_type=SignalType.NEUTRAL,
+                    strength=SignalStrength.WEAK,
+                    confidence=confidence,
+                    entry_price=entry_price,
+                    stop_loss=0,
+                    take_profit=0,
+                    timestamp=datetime.now(),
+                    reasons=[f"MARKET: {market_condition.block_reason}"],
+                    indicators=indicators,
+                    market_condition=market_condition,
+                    trade_quality=trade_quality
+                )
+            
+            # Apply market analysis confidence adjustment
+            confidence = min(100, confidence + market_condition.confidence_adjustment)
+            reasons.extend(market_condition.analysis_reasons)
+            
+            # Use structure-based entry/exit if available
+            if market_condition.support_levels and is_long:
+                # Use nearest support for stop loss
+                structure_sl = market_condition.support_levels[0] - (atr * 0.2)
+                if structure_sl > 0:
+                    stop_loss = structure_sl
+                    reasons.append(f"SL at support ${structure_sl:,.2f}")
+            
+            if market_condition.resistance_levels and is_long:
+                # Use nearest resistance for take profit
+                structure_tp = market_condition.resistance_levels[0]
+                if structure_tp > entry_price:
+                    take_profit = structure_tp
+                    reasons.append(f"TP at resistance ${structure_tp:,.2f}")
+            
+            if market_condition.resistance_levels and not is_long:
+                # For shorts: resistance is stop, support is target
+                structure_sl = market_condition.resistance_levels[0] + (atr * 0.2)
+                stop_loss = structure_sl
+            
+            if market_condition.support_levels and not is_long:
+                structure_tp = market_condition.support_levels[0]
+                if structure_tp < entry_price:
+                    take_profit = structure_tp
+        else:
+            # Calculate SL and TP without market analysis
+            stop_loss = self._get_stop_loss(entry_price, atr, is_long)
+            take_profit = self._get_take_profit(entry_price, atr, is_long)
         
         # Determine strength
         if confidence >= 80:
@@ -490,7 +571,9 @@ class SignalGenerator:
             take_profit=take_profit,
             timestamp=datetime.now(),
             reasons=reasons,
-            indicators=indicators
+            indicators=indicators,
+            market_condition=market_condition,
+            trade_quality=trade_quality
         )
     
     def check_exit_signal(self, symbol: str, 
