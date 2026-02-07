@@ -13,7 +13,14 @@ from typing import Optional, List, Dict, Tuple
 import numpy as np
 import pandas as pd
 
+import sys
 logger = logging.getLogger(__name__)
+
+# Add vendor directory to path for lag-llama
+VENDOR_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vendor", "lag-llama")
+if os.path.exists(VENDOR_DIR) and VENDOR_DIR not in sys.path:
+    sys.path.append(VENDOR_DIR)
+    logger.info(f"[LAG-LLAMA] Added vendor path: {VENDOR_DIR}")
 
 # Check for required dependencies
 try:

@@ -51,7 +51,8 @@ class ExitReason(Enum):
     SIGNAL_EXIT = "Signal Exit"
     TIME_EXIT = "Time Exit"
     RISK_LIMIT = "Risk Limit Breach"
-    DAILY_LOSS_LIMIT = "Daily Loss Limit"
+    daily_loss_limit = "Daily Loss Limit"
+    PARTIAL_TP = "Partial Take Profit"
 
 
 @dataclass
@@ -111,6 +112,7 @@ class Trade:
     take_profit: Optional[float] = None
     trailing_stop_pct: float = 0.0
     trailing_stop_price: Optional[float] = None
+    partial_tp_triggered: bool = False
     
     # State tracking
     state: TradeState = TradeState.PENDING
@@ -247,19 +249,36 @@ class RiskManager:
     def calculate_position_size(self, entry_price: float, stop_loss: float, 
                                symbol: str = "BTCUSD") -> float:
         """
-        Calculate position size based on fixed USD risk amount.
-        Uses RISK_AMOUNT_USD from config ($300 default).
-        Position Size = Risk Amount / |Entry - Stop Loss|
+        Calculate position size using DYNAMIC percentage-based risk.
+        Uses RISK_PER_TRADE (2%) of CURRENT balance for safe small account trading.
+        Position Size = (Balance × Risk%) / |Entry - Stop Loss|
         """
         if stop_loss == 0 or entry_price == 0:
             logger.warning("Invalid prices for position sizing")
             return 0.0
         
-        # Use fixed USD risk amount from config (default $300)
-        risk_amount = getattr(config, 'RISK_AMOUNT_USD', 500)
+        # DYNAMIC POSITION SIZING: Use percentage of current balance
+        use_dynamic = getattr(config, 'DYNAMIC_POSITION_SIZING', True)
         
-        # Cap at available balance
-        risk_amount = min(risk_amount, self.account_balance * 0.95)
+        if use_dynamic:
+            # Risk 2% of current balance per trade
+            risk_pct = getattr(config, 'RISK_PER_TRADE', 0.02)
+            risk_amount = self.account_balance * risk_pct
+            logger.info(f"[DYNAMIC] Risk: {risk_pct*100}% of ${self.account_balance:.2f} = ${risk_amount:.2f}")
+        else:
+            # Fallback: Fixed USD risk amount
+            risk_amount = getattr(config, 'RISK_AMOUNT_USD', 2)
+        
+        # Minimum trade size check
+        min_trade = getattr(config, 'MIN_TRADE_SIZE_USD', 1.0)
+        if risk_amount < min_trade:
+            logger.warning(f"Risk amount ${risk_amount:.2f} below minimum, using ${min_trade:.2f}")
+            risk_amount = min_trade
+        
+        # Cap at available balance with margin usage limit
+        margin_usage = getattr(config, 'MARGIN_USAGE_PCT', 0.50)
+        max_risk = self.account_balance * margin_usage
+        risk_amount = min(risk_amount, max_risk)
         
         price_risk = abs(entry_price - stop_loss)
         
@@ -268,14 +287,14 @@ class RiskManager:
         
         position_size = risk_amount / price_risk
         
-        # Apply maximum position limits
-        max_position_value = self.account_balance * 0.95  # Use 95% of balance max
-        max_size = max_position_value / entry_price * config.DEFAULT_LEVERAGE
+        # Apply maximum position limits with leverage
+        max_position_value = self.account_balance * margin_usage
+        max_size = (max_position_value / entry_price) * config.DEFAULT_LEVERAGE
         
         position_size = min(position_size, max_size)
         
-        logger.info(f"Position sizing: Entry=${entry_price}, SL=${stop_loss}, "
-                   f"Risk=${risk_amount:.2f}, Size={position_size:.4f}")
+        logger.info(f"Position sizing: Entry=${entry_price:.2f}, SL=${stop_loss:.2f}, "
+                   f"Risk=${risk_amount:.2f} ({risk_amount/self.account_balance*100:.1f}%), Size={position_size:.6f}")
         
         return position_size
     
@@ -335,6 +354,16 @@ class AdvancedTradeManager:
         self.enable_auto_execution = trade_config.get('enable_auto_execution', False)
         self.enable_trailing_stop = trade_config.get('enable_trailing_stop', True)
         self.trailing_stop_pct = trade_config.get('trailing_stop_pct', 1.5)
+        
+        # Profit Maximization Settings
+        self.partial_tp_enabled = trade_config.get('partial_tp_enabled', True)
+        self.partial_tp_pct = trade_config.get('partial_tp_pct', 0.5)  # Close 50% at target
+        self.partial_tp_activation_pct = trade_config.get('partial_tp_activation_pct', 1.5)  # Profit % to trigger
+        
+        self.time_exit_enabled = trade_config.get('time_exit_enabled', True)
+        self.max_hold_time = trade_config.get('max_hold_time_minutes', 120)  # Max hold 2 hours
+        self.stagnant_exit_minutes = trade_config.get('stagnant_exit_minutes', 15)  # Quick exit if stagnant
+
         
         # Fee structure from config (Delta Exchange X-Mas Offer rates)
         # IMPORTANT: Fees are on NOTIONAL value (price × quantity)
@@ -993,8 +1022,17 @@ class AdvancedTradeManager:
         trade.update_pnl(current_price, self.total_fee_pct)
         
         # Check trailing stop
+        # Check trailing stop
         if self.enable_trailing_stop and trade.trailing_stop_pct > 0:
             self._update_trailing_stop(trade)
+            
+        # Check Partial Take Profit
+        if self.partial_tp_enabled and not trade.partial_tp_triggered:
+            if trade.pnl_percent >= self.partial_tp_activation_pct:
+                target_pnl = self.partial_tp_activation_pct
+                # Verify we have enough profit (e.g. > 1.5%)
+                logger.info(f"[PARTIAL] Profit target met ({trade.pnl_percent:.2f}% >= {target_pnl}%)")
+                self.execute_partial_exit(trade, current_price)
     
     def _update_trailing_stop(self, trade: Trade):
         """Update trailing stop loss based on favorable price movement.
@@ -1046,6 +1084,45 @@ class AdvancedTradeManager:
                     logger.info(f"[TRAIL] {trade.trade_id} trailing stop: ${new_stop:.2f} "
                                f"(profit: {profit_pct:.2f}%, trail: {trail_pct}%)")
     
+    def execute_partial_exit(self, trade: Trade, current_price: float) -> bool:
+        """Execute partial take profit (e.g. 50% of position)"""
+        
+        if trade.partial_tp_triggered:
+            return False
+            
+        exit_size = trade.entry_size * self.partial_tp_pct
+        if exit_size < 1:  # Minimum 1 contract
+            exit_size = 1
+            
+        logger.info(f"[PARTIAL] Triggering partial exit for {trade.trade_id}: "
+                   f"Closing {exit_size} of {trade.entry_size} @ {current_price}")
+        
+        # Place exit order
+        if self.enable_auto_execution:
+            if not self._place_exit_order(trade, current_price, size=exit_size):
+                logger.error(f"[PARTIAL] Failed to place partial exit order")
+                return False
+                
+        # Update trade state
+        trade.partial_tp_triggered = True
+        trade.entry_size -= exit_size  # Reduce remaining size
+        trade.realized_pnl += (current_price - trade.entry_price) * exit_size if trade.is_long else (trade.entry_price - current_price) * exit_size
+        
+        # Move Stop Loss to Breakeven/Entry
+        if trade.is_long:
+            new_sl = trade.entry_price * 1.001  # Slight profit
+            if trade.stop_loss < new_sl:
+                trade.stop_loss = new_sl
+                logger.info(f"[PARTIAL] Moved SL to Breakeven: ${new_sl:.2f}")
+        else:
+            new_sl = trade.entry_price * 0.999
+            if trade.stop_loss > new_sl:
+                trade.stop_loss = new_sl
+                logger.info(f"[PARTIAL] Moved SL to Breakeven: ${new_sl:.2f}")
+                
+        self._save_trades()
+        return True
+
     def check_exit_conditions(self, trade_id: str) -> Optional[ExitReason]:
         """Check if trade should be exited.
         
@@ -1096,11 +1173,19 @@ class AdvancedTradeManager:
             else:
                 profit_pct = ((trade.entry_price - current_price) / trade.entry_price) * 100
             
-            # Stagnant trade: > 5 min and < 0.3% profit (or slightly negative)
-            if duration_min >= 5 and profit_pct < 0.3 and profit_pct > -0.2:
-                logger.info(f"[TIME_EXIT] {trade.trade_id} stagnant for {duration_min}m "
-                           f"with only {profit_pct:.2f}% profit - freeing capital")
-                return ExitReason.TIME_EXIT
+            # Stagnant trade: > 15 min (configurable) and < 0.3% profit
+            if self.time_exit_enabled:
+                # 1. Stagnant exit (quick)
+                if duration_min >= self.stagnant_exit_minutes and profit_pct < 0.3 and profit_pct > -0.2:
+                    logger.info(f"[TIME_EXIT] {trade.trade_id} stagnant for {duration_min}m "
+                               f"with only {profit_pct:.2f}% profit - freeing capital")
+                    return ExitReason.TIME_EXIT
+                
+                # 2. Max hold time exit (hard limit)
+                if duration_min >= self.max_hold_time:
+                    logger.info(f"[TIME_EXIT] {trade.trade_id} reached max hold time {duration_min}m "
+                               f"- closing position")
+                    return ExitReason.TIME_EXIT
         
         return None
     
@@ -1190,13 +1275,13 @@ class AdvancedTradeManager:
         
         return trade
     
-    def _place_exit_order(self, trade: Trade, exit_price: float) -> bool:
+    def _place_exit_order(self, trade: Trade, exit_price: float, size: float = None) -> bool:
         """Place exit order via API"""
         
         try:
             # Opposite side for exit
             side = "sell" if trade.is_long else "buy"
-            order_size = max(1, int(trade.entry_size))
+            order_size = size if size else max(1, int(trade.entry_size))
             
             logger.info(f"[LIVE] Placing EXIT {side.upper()} LIMIT order: {trade.symbol} x{order_size}")
             
@@ -1385,7 +1470,11 @@ class AdvancedTradeManager:
             'open_positions': len(self.open_trades),
             'total_pnl': round(total_pnl, 2),
             'daily_pnl': round(self.risk_manager.daily_pnl, 2),
+            'daily_trades': self.total_trades,  # Count for daily limit display
             'account_balance': round(self.risk_manager.account_balance, 2),
+            'available_balance': round(self.risk_manager.account_balance * (1 - getattr(config, 'MARGIN_USAGE_PCT', 0.5)), 2),
+            'margin_used': round(self.risk_manager.account_balance * getattr(config, 'MARGIN_USAGE_PCT', 0.5), 2) if len(self.open_trades) > 0 else 0,
+            'current_drawdown': round(self.risk_manager.current_drawdown, 2),
             'max_drawdown': round(self.risk_manager.current_drawdown, 2),
             'total_fees_paid': round(self.total_fees_paid, 2)
         }

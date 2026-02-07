@@ -17,12 +17,16 @@ WS_URL = os.getenv("DELTA_WS_URL", "wss://socket.india.delta.exchange")
 TRADING_SYMBOLS = os.getenv("TRADING_SYMBOLS", "BTCUSD,ETHUSD").split(",")
 DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "5m")
 
-# Risk Management - Aggressive for faster profits
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.25"))  # 25% risk per trade (fallback)
-RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "500"))  # Fixed $300 risk per trade
+# Risk Management - Conservative for $100 wallet
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))  # 2% risk per trade
+RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "2"))  # Fixed $2 risk per trade (fallback)
 MAX_POSITION_SIZE = int(os.getenv("MAX_POSITION_SIZE", "100"))
 MAX_DAILY_TRADES = 20  # More trades allowed
-MAX_DRAWDOWN_PERCENT = 0.70  # Allow more drawdown
+MAX_DRAWDOWN_PERCENT = 0.30  # Conservative 30% max drawdown
+
+# Dynamic Position Sizing
+DYNAMIC_POSITION_SIZING = True  # Use percentage of balance instead of fixed USD
+MIN_TRADE_SIZE_USD = 1.0  # Minimum trade size in USD
 
 # Leverage Configuration
 DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "200"))  # 200x leverage per trade
@@ -161,7 +165,8 @@ API_SERVER_CONFIG = {
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-secret-key")
 
 # ============ Trade Manager Configuration ============
-INITIAL_ACCOUNT_BALANCE = float(os.getenv("INITIAL_BALANCE", "10000.0"))
+# Sync from exchange on startup, fallback to env or default
+INITIAL_ACCOUNT_BALANCE = float(os.getenv("INITIAL_BALANCE", "100.0"))
 
 # Delta Exchange Fee Structure (Futures)
 # Maker: 0.02% | Taker: 0.05%

@@ -193,10 +193,34 @@ class Dashboard:
         return table
     
     def _create_stats_panel(self) -> Panel:
-        """Create trading statistics panel."""
+        """Create trading statistics panel with wallet info."""
         stats = self._stats or {}
         
         content = Text()
+        
+        # === WALLET INFO (PROMINENT) ===
+        balance = stats.get('account_balance', 0)
+        content.append("💰 Wallet: ", style="bold white")
+        balance_color = "bold green" if balance >= 100 else "bold yellow" if balance >= 50 else "bold red"
+        content.append(f"${balance:,.2f}\n", style=balance_color)
+        
+        # Available margin and margin used
+        available = stats.get('available_balance', balance)
+        margin_used = stats.get('margin_used', balance - available)
+        if margin_used > 0:
+            content.append("📊 In Use: ", style="dim")
+            content.append(f"${margin_used:,.2f}\n", style="yellow")
+        
+        # Drawdown indicator
+        drawdown = stats.get('current_drawdown', 0)
+        if drawdown > 0:
+            dd_color = "red" if drawdown > 20 else "yellow" if drawdown > 10 else "dim"
+            content.append("📉 Drawdown: ", style="dim")
+            content.append(f"{drawdown:.1f}%\n", style=dd_color)
+        
+        content.append("─" * 18 + "\n", style="dim")
+        
+        # === TRADING STATS ===
         content.append("Daily Trades: ", style="dim")
         content.append(f"{stats.get('daily_trades', 0)}/{config.MAX_DAILY_TRADES}\n", style="cyan")
         
@@ -210,6 +234,12 @@ class Dashboard:
         
         content.append("Total Trades: ", style="dim")
         content.append(f"{stats.get('total_trades', 0)}\n", style="cyan")
+        
+        # Risk info
+        content.append("─" * 18 + "\n", style="dim")
+        risk_pct = config.RISK_PER_TRADE if hasattr(config, 'RISK_PER_TRADE') else 0.02
+        content.append("Risk/Trade: ", style="dim")
+        content.append(f"{risk_pct*100:.0f}% (${balance*risk_pct:.2f})\n", style="cyan")
         
         return Panel(content, title="[STATS]", box=box.ROUNDED)
     

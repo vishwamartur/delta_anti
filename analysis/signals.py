@@ -494,7 +494,6 @@ class SignalGenerator:
                 take_profit=0,
                 timestamp=datetime.now(),
                 reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
-                reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
                 indicators=indicators
             )
         
