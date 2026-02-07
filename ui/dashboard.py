@@ -332,26 +332,22 @@ class Dashboard:
         
         content = Text()
         content.append("System Status: ", style="dim")
-        content.append("RUNNING", style="bold green")
-        content.append(f"  |  Uptime: {uptime}m", style="dim")
-        content.append(f"  |  Last Update: {now}", style="dim")
-        content.append(f"  |  Symbols: {', '.join(config.TRADING_SYMBOLS)}", style="dim")
-        content.append("\n")
-        content.append("Press ", style="dim")
-        content.append("Ctrl+C", style="bold yellow")
-        content.append(" to stop", style="dim")
-        
-        return Panel(content, title="[SYSTEM]", box=box.ROUNDED, style="dim")
+        if prices: self._prices.update(prices)
+        if indicators: self._indicators.update(indicators)
+        if signals: self._signals = signals
+        if trades: self._trades = trades
+        if stats: self._stats = stats
+        if status_message: self._status_message = status_message
     
-    def render(self) -> Layout:
-        """Render the complete dashboard layout."""
+    def _create_layout(self) -> Layout:
+        """Create dashboard layout."""
         layout = Layout()
         
-        # Main structure - removed footer, integrated messages into main
+        # Main structure
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main"),
-            Layout(name="footer", size=5)
+            Layout(name="footer", size=3)
         )
         
         # Main area split
@@ -385,6 +381,30 @@ class Dashboard:
         layout["footer"].update(self._create_footer_panel())
         
         return layout
+
+    def _create_footer_panel(self) -> Panel:
+        """Create system status footer."""
+        status = getattr(self, '_status_message', 'Running...')
+        
+        # Determine status color
+        if "analyzing" in status.lower():
+            color = "blue"
+            icon = "🔍"
+        elif "trading" in status.lower() or "executing" in status.lower():
+            color = "green"
+            icon = "⚡"
+        elif "fetching" in status.lower():
+            color = "cyan"
+            icon = "📥"
+        elif "error" in status.lower():
+            color = "red"
+            icon = "❌"
+        else:
+            color = "white"
+            icon = "ℹ️"
+            
+        content = Text(f"{icon} STATUS: {status}", style=f"bold {color}", justify="center")
+        return Panel(content, box=box.ROUNDED, style=color)
     
     def run_live(self, update_callback=None, refresh_rate: float = 1.0):
         """

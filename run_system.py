@@ -64,6 +64,7 @@ class IntegratedTradingSystem:
         # Store indicators and signals
         self._indicators = {}
         self._signals = {}
+        self.status = "Initializing..."
         
         # Signal handlers
         sig.signal(sig.SIGINT, self._signal_handler)
@@ -74,6 +75,7 @@ class IntegratedTradingSystem:
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         print("\n[SYSTEM] Shutting down gracefully...")
+        self.status = "Shutting down..."
         self.stop()
         sys.exit(0)
     
@@ -117,6 +119,7 @@ class IntegratedTradingSystem:
                             message=f"🎯 {exit_reason.value}: {symbol} @ ${current_price:,.2f} | "
                                    f"P&L: ${closed_trade.realized_pnl:+.2f} ({closed_trade.pnl_percent:+.2f}%)"
                         )
+                        self.status = f"Exited {symbol} ({exit_reason.value})"
     
     def _on_candlestick(self, data):
         """Handle candlestick updates."""
@@ -124,15 +127,18 @@ class IntegratedTradingSystem:
         
         symbol = data.get('symbol', '')
         if symbol and not symbol.startswith('MARK:'):
+            self.status = f"Analyzing {symbol}..."
             self._analyze_and_trade(symbol)
     
     def _analyze_and_trade(self, symbol):
         """Analyze symbol and execute trades via Advanced Trade Manager."""
+        self.status = f"Processing {symbol} data..."
         df = market_data.get_dataframe(symbol)
         if df is None or len(df) < 50:
             return
         
         # Calculate indicators
+        self.status = f"Calculating indicators: {symbol}"
         ind = indicators.calculate_all(df)
         if ind is None:
             return
@@ -142,12 +148,14 @@ class IntegratedTradingSystem:
         # Update open trades P&L and check exits
         for trade_id, trade in list(self.trade_manager.open_trades.items()):
             if trade.symbol == symbol:
+                self.status = f"Monitoring trade: {symbol}"
                 # Update P&L with current price
                 self.trade_manager.update_trade_pnl(trade_id, ind.price)
                 
                 # Check exit conditions (SL/TP/Trailing)
                 exit_reason = self.trade_manager.check_exit_conditions(trade_id)
                 if exit_reason:
+                    self.status = f"Closing trade: {symbol}"
                     closed_trade = self.trade_manager.close_trade(
                         trade_id, exit_reason, ind.price
                     )
@@ -161,19 +169,25 @@ class IntegratedTradingSystem:
         
         # Generate entry signal if no open position for this symbol
         if not self.trade_manager.has_open_position(symbol):
+            self.status = f"Scanning for signals: {symbol}"
             signal = signal_generator.generate_signal(symbol, ind, df)
             self._signals[symbol] = signal
             
             if signal.is_actionable():
+                self.status = f"Executing signal: {symbol}"
                 self._execute_signal(signal, ind)
+            else:
+                self.status = f"No signal: {symbol} (Waiting)"
     
     def _execute_signal(self, signal: TradeSignal, indicators):
         """Execute trade from signal via Advanced Trade Manager."""
+        self.status = f"Placing order: {signal.symbol} ({signal.signal_type.value})"
         
         # Create trade via trade manager
         trade = self.trade_manager.create_trade_from_signal(signal, indicators)
         
         if trade:
+            self.status = f"Trade Active: {trade.symbol}"
             dashboard.update(
                 message=f"TRADE: {trade.direction.value} {trade.symbol} "
                        f"@ ${trade.entry_price:,.2f} | Size: {trade.entry_size:.4f} | "
@@ -184,6 +198,7 @@ class IntegratedTradingSystem:
     def _load_historical_data(self):
         """Load historical candles for all symbols."""
         print("[SYSTEM] Loading historical data...")
+        self.status = "Loading historical data..."
         for symbol in self.symbols:
             success = market_data.load_historical_candles(
                 symbol=symbol,
@@ -196,6 +211,7 @@ class IntegratedTradingSystem:
     
     def _setup_websocket(self):
         """Setup WebSocket connections."""
+        self.status = "Connecting to WebSocket..."
         ws_client.on_ticker = self._on_ticker
         ws_client.on_candlestick = self._on_candlestick
         
@@ -203,12 +219,15 @@ class IntegratedTradingSystem:
         time.sleep(2)
         
         if ws_client.is_connected:
+            self.status = "Connected - Subscribing..."
             ws_client.subscribe_ticker(self.symbols)
             ws_client.subscribe_candlestick(self.symbols, self.timeframe)
             print(f"[SYSTEM] WebSocket connected - Subscribed to {self.symbols}")
             print(f"[SYSTEM] ✅ Real-time TP/SL monitoring ACTIVE via ticker updates")
+            self.status = "Monitoring Market (Real-time)"
         else:
             print("[SYSTEM] WebSocket failed - Running in REST-only mode")
+            self.status = "WebSocket Failed - REST Mode"
     
     def _update_dashboard(self):
         """Update dashboard with latest data and sync with exchange."""
@@ -234,7 +253,8 @@ class IntegratedTradingSystem:
             indicators=self._indicators,
             signals=self._signals,
             trades=open_trades,
-            stats=self.trade_manager.get_statistics()
+            stats=self.trade_manager.get_statistics(),
+            status_message=self.status
         )
     
     def start(self):
@@ -256,7 +276,9 @@ class IntegratedTradingSystem:
                 )
             else:
                 # Polling mode
+                self.status = "Polling Mode Active"
                 while self.running:
+                    self.status = "Polling: Fetching Data..."
                     self._update_dashboard()
                     time.sleep(10)
         except KeyboardInterrupt:
