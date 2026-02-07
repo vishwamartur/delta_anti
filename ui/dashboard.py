@@ -103,35 +103,51 @@ class Dashboard:
         return table
     
     def _create_signals_table(self) -> Table:
-        """Create trading signals table."""
+        """Create trading signals table with SMC institutional signals."""
         table = Table(title="[SIGNALS]", box=box.ROUNDED, show_header=True)
         table.add_column("Symbol", style="cyan", width=10)
-        table.add_column("Signal", justify="center", width=12)
-        table.add_column("Confidence", justify="right", width=10)
-        table.add_column("Entry", justify="right", width=12)
-        table.add_column("Stop Loss", justify="right", width=12)
-        table.add_column("Take Profit", justify="right", width=12)
-        table.add_column("R:R", justify="right", width=6)
+        table.add_column("Signal", justify="center", width=14)
+        table.add_column("Conf", justify="right", width=5)
+        table.add_column("Entry", justify="right", width=10)
+        table.add_column("SL", justify="right", width=10)
+        table.add_column("TP", justify="right", width=10)
+        table.add_column("R:R", justify="right", width=5)
+        table.add_column("Status", justify="left", width=12)
         
         for symbol, signal in self._signals.items():
-            if signal.signal_type == SignalType.NEUTRAL:
-                continue
-            
             color = self._get_signal_color(signal)
-            strength_mark = "***" if signal.strength == SignalStrength.STRONG else "**" if signal.strength == SignalStrength.MODERATE else "*"
+            
+            # Show signal type with strength indicator
+            if signal.signal_type == SignalType.NEUTRAL:
+                signal_text = "WAITING"
+                color = "dim"
+                # Show blocking reason if available
+                status = signal.reasons[0][:12] if signal.reasons else "Analyzing..."
+            else:
+                strength_mark = "🔥" if signal.strength == SignalStrength.STRONG else "⚡" if signal.strength == SignalStrength.MODERATE else "•"
+                signal_text = f"{strength_mark} {signal.signal_type.value}"
+                # Check if SMC confirmed
+                smc_confirmed = any("SMC" in r for r in signal.reasons)
+                status = "🏦 SMC" if smc_confirmed else "✓ Ready"
+            
+            # Format prices (0 means not set)
+            sl_text = f"${signal.stop_loss:,.0f}" if signal.stop_loss > 0 else "---"
+            tp_text = f"${signal.take_profit:,.0f}" if signal.take_profit > 0 else "---"
+            rr_text = f"{signal.risk_reward_ratio:.1f}" if signal.stop_loss > 0 else "---"
             
             table.add_row(
                 symbol,
-                Text(f"{strength_mark} {signal.signal_type.value}", style=f"bold {color}"),
+                Text(signal_text, style=f"bold {color}"),
                 Text(f"{signal.confidence}%", style=color),
-                f"${signal.entry_price:,.2f}",
-                f"${signal.stop_loss:,.2f}",
-                f"${signal.take_profit:,.2f}",
-                f"{signal.risk_reward_ratio:.1f}"
+                f"${signal.entry_price:,.0f}",
+                sl_text,
+                tp_text,
+                rr_text,
+                Text(status, style="cyan" if "SMC" in status else "dim")
             )
         
-        if not any(s.signal_type != SignalType.NEUTRAL for s in self._signals.values()):
-            table.add_row("---", "No signals", "---", "---", "---", "---", "---")
+        if not self._signals:
+            table.add_row("---", "No data", "---", "---", "---", "---", "---", "Loading...")
         
         return table
     
@@ -244,21 +260,31 @@ class Dashboard:
         return Panel(content, title="[STATS]", box=box.ROUNDED)
     
     def _create_signal_details_panel(self) -> Panel:
-        """Create panel with signal reasoning."""
+        """Create panel with signal reasoning including SMC analysis."""
         content = Text()
         
         for symbol, signal in self._signals.items():
-            if signal.signal_type == SignalType.NEUTRAL:
-                continue
-            
             color = self._get_signal_color(signal)
-            content.append(f"\n{symbol} - {signal.signal_type.value}\n", style=f"bold {color}")
             
-            for reason in signal.reasons[:4]:  # Limit to 4 reasons
-                content.append(f"  • {reason}\n", style="dim")
+            # Show all signals, not just active ones
+            if signal.signal_type == SignalType.NEUTRAL:
+                content.append(f"\n{symbol} - ", style="dim")
+                content.append("WAITING\n", style="yellow")
+            else:
+                content.append(f"\n{symbol} - ", style=f"bold {color}")
+                content.append(f"{signal.signal_type.value}\n", style=f"bold {color}")
+            
+            # Show reasons with SMC highlighted
+            for reason in signal.reasons[:5]:  # Show up to 5 reasons
+                if "SMC" in reason or "Liquidity" in reason:
+                    content.append(f"  🏦 {reason}\n", style="cyan bold")
+                elif "BLOCKED" in reason or "CONFLICT" in reason:
+                    content.append(f"  ⚠ {reason}\n", style="red")
+                else:
+                    content.append(f"  • {reason}\n", style="dim")
         
         if not content.plain:
-            content.append("Waiting for signals...", style="dim")
+            content.append("Analyzing market...", style="dim")
         
         return Panel(content, title="[ANALYSIS]", box=box.ROUNDED)
     

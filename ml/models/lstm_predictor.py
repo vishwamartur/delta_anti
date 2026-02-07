@@ -177,7 +177,7 @@ class LSTMPredictor:
             features['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
         
         # Fill NaN values
-        features = features.fillna(method='bfill').fillna(0)
+        features = features.bfill().fillna(0)
         
         return features.values[:, :self.features]
     
@@ -445,5 +445,32 @@ class LSTMPredictor:
         print(f"[ML] Predictor loaded from {path}")
 
 
-# Singleton instance
-lstm_predictor = LSTMPredictor()
+def _create_lstm_predictor():
+    """Create LSTM predictor and auto-load trained model if available."""
+    predictor = LSTMPredictor(features=18)
+    
+    # Auto-load trained model if it exists
+    model_paths = [
+        'models/lstm_predictor.pkl',  # Default trained model
+        'models/lstm_btcusd.pkl',     # BTC-specific model
+    ]
+    
+    for path in model_paths:
+        if os.path.exists(path):
+            try:
+                predictor.load(path)
+                print(f"[ML] ✓ Auto-loaded trained LSTM from {path}")
+                print(f"[ML]   Trained: {predictor.is_trained}, "
+                      f"History: {len(predictor.training_history)} epochs")
+                break
+            except Exception as e:
+                print(f"[ML] ⚠ Failed to load {path}: {e}")
+                continue
+    else:
+        print("[ML] ℹ No trained LSTM model found. Run train_lstm.py to train.")
+    
+    return predictor
+
+
+# Singleton instance - auto-loads trained model on import
+lstm_predictor = _create_lstm_predictor()

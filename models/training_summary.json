@@ -1,0 +1,25 @@
+{
+  "last_trained": "2026-02-07T12:23:23.359403",
+  "results": {
+    "BTCUSD": {
+      "success": true,
+      "symbol": "BTCUSD",
+      "data_points": 1826,
+      "date_range": {
+        "start": "2021-02-08T00:00:00",
+        "end": "2026-02-07T00:00:00"
+      },
+      "training_time_seconds": 73.69,
+      "epochs_completed": 21,
+      "final_train_loss": 0.04372826281339965,
+      "final_val_loss": 0.2834796607494354,
+      "model_path": "E:\\deltaanti\\models\\lstm_btcusd.pkl",
+      "quality_metrics": {
+        "score": 50,
+        "rating": "WEAK",
+        "final_loss": 0.2834796607494354,
+        "convergence_trend": "improving"
+      }
+    }
+  }
+}
