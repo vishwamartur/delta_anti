@@ -67,10 +67,28 @@ class SentimentAnalyzer:
                 logging.getLogger("transformers").setLevel(logging.ERROR)
                 warnings.filterwarnings("ignore", message=".*chat_templates.*")
                 
+                # Load HF token from environment for authenticated requests
+                from dotenv import load_dotenv
+                load_dotenv()
+                hf_token = os.getenv("HF_TOKEN")
+                
+                # Load model and tokenizer separately with pytorch format 
+                # (safetensors not available for this model)
+                from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    "ProsusAI/finbert",
+                    token=hf_token,
+                    use_safetensors=False  # Use pytorch format
+                )
+                tokenizer = AutoTokenizer.from_pretrained(
+                    "ProsusAI/finbert",
+                    token=hf_token
+                )
+                
                 self.model = pipeline(
                     "sentiment-analysis",
-                    model="ProsusAI/finbert",
-                    tokenizer="ProsusAI/finbert",
+                    model=model,
+                    tokenizer=tokenizer,
                     device=-1  # Use CPU to avoid GPU memory issues
                 )
                 

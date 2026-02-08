@@ -158,6 +158,14 @@ class LagLlamaPredictor:
             # Extract model configuration
             model_kwargs = ckpt.get("hyper_parameters", {}).get("model_kwargs", {})
             
+            # Remove keys that we pass explicitly or have type mismatches to avoid errors
+            # - distr_output: checkpoint has object, estimator expects string
+            # - lags_seq: checkpoint has integer list, estimator expects frequency strings like ['Q','M','W']
+            conflicting_keys = ['context_length', 'prediction_length', 'device', 'batch_size', 
+                               'num_samples', 'ckpt_path', 'nonnegative_pred_samples', 'distr_output',
+                               'num_parallel_samples', 'scaling', 'lags_seq']
+            filtered_kwargs = {k: v for k, v in model_kwargs.items() if k not in conflicting_keys}
+            
             # Import Lag-Llama estimator (lazy import)
             from lag_llama.gluon.estimator import LagLlamaEstimator
             
@@ -166,16 +174,20 @@ class LagLlamaPredictor:
                 ckpt_path=self.model_path,
                 prediction_length=self.prediction_length,
                 context_length=self.context_length,
-                num_samples=self.num_samples,
-                device=self.device,
+                num_parallel_samples=self.num_samples,  # renamed from num_samples
                 batch_size=self.batch_size,
                 nonnegative_pred_samples=True,  # Prices are positive
-                **model_kwargs
+                **filtered_kwargs
             )
             
-            # Create predictor
+            # Create lightning module (loads weights from checkpoint)
+            lightning_module = self.estimator.create_lightning_module()
+            
+            # Create predictor - requires both transformation and module
+            transformation = self.estimator.create_transformation()
             self.model = self.estimator.create_predictor(
-                transformation=self.estimator.create_transformation()
+                transformation=transformation,
+                module=lightning_module
             )
             
             self.is_initialized = True
@@ -189,10 +201,12 @@ class LagLlamaPredictor:
             logger.error(f"[LAG-LLAMA] Model initialization failed: {e}")
             raise
     
-    def _prepare_data(self, df: pd.DataFrame, symbol: str = "BTCUSD") -> 'PandasDataset':
+    def _prepare_data(self, df: pd.DataFrame, symbol: str = "BTCUSD"):
         """Prepare DataFrame for Lag-Llama input."""
         if not GLUONTS_AVAILABLE:
             raise RuntimeError("GluonTS not installed")
+        
+        from gluonts.dataset.common import ListDataset
         
         # Ensure proper column names
         if 'close' in df.columns:
@@ -203,22 +217,28 @@ class LagLlamaPredictor:
             raise ValueError("DataFrame must have 'close' or 'Close' column")
         
         # Ensure datetime index
-        if 'timestamp' in df.columns:
-            df = df.set_index('timestamp')
-        elif 'date' in df.columns:
-            df = df.set_index('date')
-        elif 'Date' in df.columns:
-            df = df.set_index('Date')
+        df_copy = df.copy()
+        if 'timestamp' in df_copy.columns:
+            df_copy = df_copy.set_index('timestamp')
+        elif 'date' in df_copy.columns:
+            df_copy = df_copy.set_index('date')
+        elif 'Date' in df_copy.columns:
+            df_copy = df_copy.set_index('Date')
         
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index)
+        if not isinstance(df_copy.index, pd.DatetimeIndex):
+            df_copy.index = pd.to_datetime(df_copy.index)
         
-        # Create GluonTS dataset
-        dataset = PandasDataset.from_long_dataframe(
-            df.reset_index(),
-            item_id=symbol,
-            timestamp="index" if "index" in df.reset_index().columns else df.reset_index().columns[0],
-            target=target_col
+        # Ensure index is sorted
+        df_copy = df_copy.sort_index()
+        
+        # Get target values
+        target = df_copy[target_col].values.astype(np.float32)
+        start_time = df_copy.index[0]
+        
+        # Create ListDataset (more reliable than PandasDataset)
+        dataset = ListDataset(
+            [{"start": start_time, "target": target, "item_id": symbol}],
+            freq="5min"  # Default to 5-minute frequency for trading data
         )
         
         return dataset

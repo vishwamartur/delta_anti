@@ -4,21 +4,21 @@ INFO:httpx:HTTP Request: HEAD https://huggingface.co/ProsusAI/finbert/resolve/ma
 INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/commits/main "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/discussions?p=0 "HTTP/1.1 200 OK"
-INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
 INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/commits/refs%2Fpr%2F29 "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/ProsusAI/finbert/resolve/refs%2Fpr%2F29/model.safetensors.index.json "HTTP/1.1 404 Not Found"
+INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/ProsusAI/finbert/resolve/refs%2Fpr%2F29/model.safetensors "HTTP/1.1 302 Found"
 INFO:httpx:HTTP Request: GET https://huggingface.co/api/models/ProsusAI/finbert/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] Added vendor path: E:\deltaanti\vendor\lag-llama
 INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] No GPU detected, using CPU
 INFO:root:Initializing LagLlamaPredictor...
 INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] Initialized: device=cpu, context=256, horizon=24
 INFO:root:Creating dummy data...
 INFO:root:Running prediction...
 INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] Model found at E:\deltaanti\ml\models\..\..\models\lag_llama\lag-llama.ckpt
-INFO:httpx:HTTP Request: HEAD https://huggingface.co/ProsusAI/finbert/resolve/refs%2Fpr%2F29/model.safetensors.index.json "HTTP/1.1 404 Not Found"
-INFO:httpx:HTTP Request: HEAD https://huggingface.co/ProsusAI/finbert/resolve/refs%2Fpr%2F29/model.safetensors "HTTP/1.1 302 Found"
-ERROR:ml.models.lag_llama_predictor:[LAG-LLAMA] lag_llama package not installed. Clone: git clone https://github.com/time-series-foundation-models/lag-llama
-ERROR:ml.models.lag_llama_predictor:[LAG-LLAMA] Prediction error: No module named 'gluonts.torch.modules.loss'
-INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] Using fallback momentum predictor
+INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] Model initialized successfully
+INFO:ml.models.lag_llama_predictor:[LAG-LLAMA] BTCUSD: bearish (-57.79%, conf=10.0%)
 INFO:root:Prediction successful!
 INFO:root:Direction: bearish
-INFO:root:Confidence: 0.5
-INFO:root:Predicted Prices: [np.float64(49345.36288046584), np.float64(49311.55240789614), np.float64(49277.76510159757), np.float64(49244.00094569706), np.float64(49210.2599243324)]...
+INFO:root:Confidence: 0.1
+INFO:root:Predicted Prices: [48652.51953125, 48034.26953125, 47458.90625, 45914.0390625, 43816.4453125]...
