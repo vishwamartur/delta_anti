@@ -1,45 +1,21 @@
 {
-  "trades": {
-    "T1770571597730": {
-      "trade_id": "T1770571597730",
-      "symbol": "ETHUSD",
-      "direction": "LONG",
-      "entry_price": 2054.85,
-      "entry_size": 0.2709506997591081,
-      "entry_time": null,
-      "exit_price": null,
-      "exit_size": 0.0,
-      "exit_time": null,
-      "exit_reason": null,
-      "stop_loss": 2046.6306,
-      "take_profit": 2067.1791,
-      "trailing_stop_price": null,
-      "state": "REJECTED",
-      "current_price": 0.0,
-      "realized_pnl": 0.0,
-      "unrealized_pnl": 0.0,
-      "pnl_percent": 0.0,
-      "ml_confidence": 83,
-      "strategy_name": "delta_anti_v1",
-      "duration_minutes": 0
-    }
-  },
+  "trades": {},
   "history": [],
   "stats": {
-    "total_trades": 94,
-    "winning_trades": 10,
-    "losing_trades": 84,
-    "win_rate": 10.6,
+    "total_trades": 104,
+    "winning_trades": 15,
+    "losing_trades": 89,
+    "win_rate": 14.4,
     "open_positions": 0,
     "total_pnl": 0,
     "daily_pnl": 0.0,
-    "daily_trades": 94,
-    "account_balance": 111.35,
-    "available_balance": 55.68,
+    "daily_trades": 104,
+    "account_balance": 292.96,
+    "available_balance": 146.48,
     "margin_used": 0,
     "current_drawdown": 0.0,
     "max_drawdown": 0.0,
     "total_fees_paid": 0.0
   },
-  "last_updated": "2026-02-08T22:57:42.094021"
+  "last_updated": "2026-02-10T12:21:25.380777"
 }

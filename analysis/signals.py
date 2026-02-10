@@ -202,8 +202,11 @@ class SignalGenerator:
             try:
                 prediction = lstm_predictor.predict(df)
                 if prediction:
-                    result['direction'] = prediction.direction.lower()
-                    result['confidence'] = int(prediction.confidence * 100)
+                    # Map LSTM directions (up/down/neutral) to standard format (bullish/bearish/neutral)
+                    direction_map = {'up': 'bullish', 'down': 'bearish', 'neutral': 'neutral'}
+                    result['direction'] = direction_map.get(prediction.direction.lower(), 'neutral')
+                    # LSTM confidence is already 50-95 scale, not 0-1
+                    result['confidence'] = int(prediction.confidence)
                     result['change_pct'] = prediction.predicted_change_pct
                     result['model'] = 'lstm'
                     logger.info(f"[LSTM] {symbol}: {result['direction']} "
@@ -228,7 +231,8 @@ class SignalGenerator:
             sentiment_signal = sentiment_analyzer.get_sentiment_signal(symbol)
             if sentiment_signal:
                 result['score'] = sentiment_signal.get('score', 0)
-                result['direction'] = sentiment_signal.get('direction', 'neutral')
+                # Lowercase to match expected format (bullish/bearish/neutral)
+                result['direction'] = sentiment_signal.get('direction', 'neutral').lower()
                 result['confidence'] = sentiment_signal.get('strength', 50)
                 logger.info(f"[SENTIMENT] {symbol}: {result['direction']} "
                            f"(score: {result['score']:.2f})")
@@ -479,7 +483,7 @@ class SignalGenerator:
         
         # === ML VALIDATION: Confirm signal with AI predictions ===
         direction = "LONG" if is_long else "SHORT"
-        ml_confirmed, ml_boost, ml_reasons = self._validate_with_ml(direction, symbol)
+        ml_confirmed, ml_boost, ml_reasons = self._validate_with_ml(direction, symbol, df)
         
         if not ml_confirmed:
             # ML strongly disagrees with the signal
@@ -532,6 +536,10 @@ class SignalGenerator:
         market_condition = None
         trade_quality = 0
         
+        # Default SL/TP based on ATR (may be overridden by market analysis)
+        stop_loss = self._get_stop_loss(entry_price, atr, is_long)
+        take_profit = self._get_take_profit(entry_price, atr, is_long)
+        
         if df is not None and self.market_analyzer:
             direction = "LONG" if is_long else "SHORT"
             market_condition = self.market_analyzer.analyze_market(symbol, df, indicators, direction)
@@ -582,10 +590,7 @@ class SignalGenerator:
                 structure_tp = market_condition.support_levels[0]
                 if structure_tp < entry_price:
                     take_profit = structure_tp
-        else:
-            # Calculate SL and TP without market analysis
-            stop_loss = self._get_stop_loss(entry_price, atr, is_long)
-            take_profit = self._get_take_profit(entry_price, atr, is_long)
+        # (SL/TP defaults already set above, no else needed)
         
         # Determine strength
         if confidence >= 80:

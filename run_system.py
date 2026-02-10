@@ -255,9 +255,39 @@ class IntegratedTradingSystem:
                     refresh_rate=config.REFRESH_RATE
                 )
             else:
-                # Polling mode
+                # Polling mode - fetch candles via REST and analyze
                 while self.running:
-                    self._update_dashboard()
+                    try:
+                        for symbol in self.symbols:
+                            end_time = int(time.time())
+                            start_time = end_time - 3600  # Last hour
+                            
+                            response = rest_client.get_candles(
+                                symbol=symbol,
+                                resolution=self.timeframe,
+                                start=start_time,
+                                end=end_time
+                            )
+                            
+                            if 'result' in response:
+                                from data.market_data import Candle
+                                for c in response['result'][-5:]:
+                                    candle = Candle(
+                                        timestamp=c.get('time', 0),
+                                        open=float(c.get('open', 0)),
+                                        high=float(c.get('high', 0)),
+                                        low=float(c.get('low', 0)),
+                                        close=float(c.get('close', 0)),
+                                        volume=float(c.get('volume', 0))
+                                    )
+                                    market_data.add_candle(symbol, candle)
+                            
+                            self._analyze_and_trade(symbol)
+                        
+                        self._update_dashboard()
+                    except Exception as e:
+                        logger.error(f"Polling error: {e}")
+                    
                     time.sleep(10)
         except KeyboardInterrupt:
             pass
