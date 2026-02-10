@@ -154,6 +154,60 @@ ML_CONFIG = {
     }
 }
 
+# ============ ML Validation Thresholds (Tuned) ============
+ML_VALIDATION_CONFIG = {
+    "ml_confidence_threshold": 60,      # Require 60%+ ML confidence to act (was 50)
+    "sentiment_score_threshold": 0.3,   # Require |score| > 0.3 to act (was 0.2)
+    "ml_confirm_boost": 15,             # Confidence boost when ML confirms
+    "ml_block_on_disagree": True,       # Block signal when ML strongly disagrees
+    "sentiment_confirm_boost": 10,      # Confidence boost when sentiment confirms
+    "sentiment_penalty": -10,           # Confidence penalty when sentiment disagrees
+}
+
+# ============ Multi-Timeframe Configuration ============
+MULTI_TIMEFRAME_CONFIG = {
+    "enabled": True,
+    "higher_timeframe": "1h",           # Higher TF for trend confirmation
+    "trend_agreement_required": True,   # Only trade when HTF trend aligns
+    "htf_lookback_hours": 24,           # Hours of HTF data to load
+    "htf_trend_boost": 10,              # Confidence boost when HTF confirms
+    "htf_block_penalty": True,          # Block trades against HTF trend
+}
+
+# ============ Ensemble Model Voting ============
+ENSEMBLE_CONFIG = {
+    "enabled": True,
+    "require_consensus": False,         # Don't require both to agree
+    "consensus_bonus": 20,              # Extra confidence when both models agree
+    "single_model_weight": 1.0,         # Weight for single model prediction
+    "consensus_weight": 1.5,            # Weight multiplier for consensus predictions
+    "min_models_required": 1,           # Minimum models needed for prediction
+}
+
+# ============ Dynamic Position Sizing (Confluence) ============
+DYNAMIC_SIZING_CONFIG = {
+    "enabled": True,
+    "base_risk_pct": 0.02,              # Base 2% risk
+    "max_risk_pct": 0.05,               # Max 5% risk on high confluence
+    "confluence_tiers": {
+        # confidence_range: risk_multiplier
+        80: 1.0,    # 80-85 confidence → 1x base risk (2%)
+        86: 1.5,    # 86-90 confidence → 1.5x risk (3%)
+        91: 2.0,    # 91-95 confidence → 2x risk (4%)
+        96: 2.5,    # 96-100 confidence → 2.5x risk (5%)
+    }
+}
+
+# ============ DQN Agent Integration ============
+DQN_INTEGRATION_CONFIG = {
+    "enabled": True,
+    "dqn_confirm_boost": 10,            # Confidence boost when DQN agrees
+    "dqn_hold_penalty": -5,             # Penalty when DQN says HOLD
+    "dqn_oppose_penalty": -15,          # Penalty when DQN opposes direction
+    "train_on_outcomes": True,          # Enable online learning from trade results
+    "save_every_n_trades": 10,          # Save DQN model every N completed trades
+}
+
 # ============ API Server Configuration ============
 API_SERVER_CONFIG = {
     "host": os.getenv("API_HOST", "0.0.0.0"),

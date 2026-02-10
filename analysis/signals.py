@@ -52,6 +52,20 @@ try:
 except ImportError:
     SMC_AVAILABLE = False
 
+# Multi-Timeframe Analysis
+try:
+    from analysis.multi_timeframe import get_multi_timeframe_analyzer
+    MTF_AVAILABLE = True
+except ImportError:
+    MTF_AVAILABLE = False
+
+# DQN Trading Agent
+try:
+    from ml.agents.dqn_trader import dqn_agent
+    DQN_AVAILABLE = True
+except ImportError:
+    DQN_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,51 +183,99 @@ class SignalGenerator:
         return entry - (atr * multiplier)
     
     def _get_ml_prediction(self, symbol: str, df=None) -> Dict:
-        """Get ML prediction for price direction and confidence.
+        """Get ML prediction using ensemble voting (parallel LSTM + Lag-Llama).
         
-        Uses Lag-Llama (foundation model) if available, falls back to LSTM.
+        Runs both models and combines their predictions:
+        - Both agree → high confidence (average + consensus bonus)
+        - Disagree → use stronger model, reduce confidence
+        - One model only → use as-is
         
         Returns:
-            Dict with 'direction' ('bullish'/'bearish'), 'confidence' (0-100), 'change_pct'
+            Dict with 'direction', 'confidence' (0-100), 'change_pct', 'model', 'ensemble'
         """
-        result = {'direction': 'neutral', 'confidence': 0, 'change_pct': 0.0, 'model': 'none'}
+        result = {'direction': 'neutral', 'confidence': 0, 'change_pct': 0.0, 'model': 'none', 'ensemble': False}
+        ensemble_cfg = getattr(config, 'ENSEMBLE_CONFIG', {})
         
         if df is None:
             return result
         
-        # Try Lag-Llama first (more advanced foundation model)
+        predictions = []  # Collect predictions from all available models
+        
+        # === Model 1: Lag-Llama ===
         if LAG_LLAMA_AVAILABLE:
             try:
                 lag_llama = get_lag_llama_predictor()
                 signal = lag_llama.get_trading_signal(df, symbol)
                 if signal and signal.get('confidence', 0) > 0:
-                    result['direction'] = signal['direction']
-                    result['confidence'] = int(signal['confidence'] * 100)
-                    result['change_pct'] = signal.get('change_pct', 0)
-                    result['model'] = 'lag-llama'
-                    logger.info(f"[LAG-LLAMA] {symbol}: {result['direction']} "
-                               f"({result['confidence']}%, {result['change_pct']:+.2f}%)")
-                    return result
+                    predictions.append({
+                        'direction': signal['direction'],
+                        'confidence': int(signal['confidence'] * 100),
+                        'change_pct': signal.get('change_pct', 0),
+                        'model': 'lag-llama'
+                    })
+                    logger.info(f"[ENSEMBLE:LAG-LLAMA] {symbol}: {signal['direction']} "
+                               f"({int(signal['confidence']*100)}%)")
             except Exception as e:
-                logger.debug(f"[LAG-LLAMA] Error, falling back to LSTM: {e}")
+                logger.debug(f"[ENSEMBLE:LAG-LLAMA] Error: {e}")
         
-        # Fallback to LSTM predictor
+        # === Model 2: LSTM ===
         if ML_AVAILABLE:
             try:
                 prediction = lstm_predictor.predict(df)
                 if prediction:
-                    # Map LSTM directions (up/down/neutral) to standard format (bullish/bearish/neutral)
                     direction_map = {'up': 'bullish', 'down': 'bearish', 'neutral': 'neutral'}
-                    result['direction'] = direction_map.get(prediction.direction.lower(), 'neutral')
-                    # LSTM confidence is already 50-95 scale, not 0-1
-                    result['confidence'] = int(prediction.confidence)
-                    result['change_pct'] = prediction.predicted_change_pct
-                    result['model'] = 'lstm'
-                    logger.info(f"[LSTM] {symbol}: {result['direction']} "
-                               f"({result['confidence']}%, {result['change_pct']:+.2f}%)")
+                    lstm_dir = direction_map.get(prediction.direction.lower(), 'neutral')
+                    predictions.append({
+                        'direction': lstm_dir,
+                        'confidence': int(prediction.confidence),
+                        'change_pct': prediction.predicted_change_pct,
+                        'model': 'lstm'
+                    })
+                    logger.info(f"[ENSEMBLE:LSTM] {symbol}: {lstm_dir} ({int(prediction.confidence)}%)")
             except Exception as e:
-                logger.debug(f"[LSTM] Prediction error: {e}")
+                logger.debug(f"[ENSEMBLE:LSTM] Error: {e}")
+        
+        # === Ensemble Decision ===
+        if not predictions:
+            return result
+        
+        if len(predictions) == 1:
+            # Single model — use directly
+            p = predictions[0]
+            result['direction'] = p['direction']
+            result['confidence'] = p['confidence']
+            result['change_pct'] = p['change_pct']
+            result['model'] = p['model']
+            result['ensemble'] = False
+        else:
+            # Two models — ensemble voting
+            p1, p2 = predictions[0], predictions[1]
+            consensus_bonus = ensemble_cfg.get('consensus_bonus', 20)
             
+            if p1['direction'] == p2['direction']:
+                # CONSENSUS: Both models agree
+                avg_conf = (p1['confidence'] + p2['confidence']) // 2
+                result['direction'] = p1['direction']
+                result['confidence'] = min(100, avg_conf + consensus_bonus)
+                result['change_pct'] = (p1['change_pct'] + p2['change_pct']) / 2
+                result['model'] = f"{p1['model']}+{p2['model']}"
+                result['ensemble'] = True
+                logger.info(f"[ENSEMBLE] ✅ CONSENSUS {symbol}: {result['direction']} "
+                           f"({result['confidence']}% = avg {avg_conf}% + {consensus_bonus}% bonus)")
+            else:
+                # DISAGREEMENT: Use stronger model, penalize confidence
+                stronger = p1 if p1['confidence'] > p2['confidence'] else p2
+                weaker = p2 if stronger == p1 else p1
+                penalty = min(15, abs(weaker['confidence'] - 30))  # Penalty based on weaker's conviction
+                result['direction'] = stronger['direction']
+                result['confidence'] = max(0, stronger['confidence'] - penalty)
+                result['change_pct'] = stronger['change_pct']
+                result['model'] = f"{stronger['model']}>{weaker['model']}"
+                result['ensemble'] = True
+                logger.info(f"[ENSEMBLE] ⚠️ SPLIT {symbol}: using {stronger['model']} "
+                           f"({result['direction']} {result['confidence']}%, "
+                           f"{weaker['model']} said {weaker['direction']})")
+        
         return result
     
     def _get_sentiment(self, symbol: str) -> Dict:
@@ -241,8 +303,90 @@ class SignalGenerator:
             
         return result
     
-    def _validate_with_ml(self, signal_direction: str, symbol: str, df=None) -> tuple:
-        """Validate technical signal with ML predictions.
+    def _build_dqn_state(self, indicators: 'IndicatorValues') -> 'np.ndarray':
+        """Build 50-dim state vector for DQN from indicator values."""
+        import numpy as np
+        state = np.zeros(50, dtype=np.float32)
+        
+        try:
+            price = indicators.price or 0
+            
+            # Price features (0-4)
+            state[0] = price / 100000 if price > 0 else 0  # Normalized BTC price
+            state[1] = getattr(indicators, 'price_change_pct', 0) or 0
+            state[2] = (indicators.atr / price * 100) if (indicators.atr and price) else 0
+            state[3] = ((price - indicators.sma_20) / indicators.sma_20 * 100) if indicators.sma_20 else 0
+            state[4] = ((price - indicators.ema_21) / indicators.ema_21 * 100) if indicators.ema_21 else 0
+            
+            # Oscillators (5-9)
+            state[5] = (indicators.rsi / 100) if indicators.rsi else 0.5
+            state[6] = (indicators.macd_line / price * 1000) if (indicators.macd_line and price) else 0
+            state[7] = (indicators.macd_signal / price * 1000) if (indicators.macd_signal and price) else 0
+            state[8] = (indicators.macd_histogram / price * 1000) if (indicators.macd_histogram and price) else 0
+            state[9] = (indicators.adx / 100) if indicators.adx else 0
+            
+            # Bollinger Bands (10-12)
+            if indicators.bb_upper and indicators.bb_lower and price:
+                bb_range = indicators.bb_upper - indicators.bb_lower
+                state[10] = (price - indicators.bb_lower) / bb_range if bb_range > 0 else 0.5  # %B
+                state[11] = bb_range / price  # Band width
+            state[12] = (indicators.bb_middle / price) if (indicators.bb_middle and price) else 1.0
+            
+            # EMA features (13-16)
+            if indicators.ema_9 and indicators.ema_21:
+                state[13] = 1.0 if indicators.ema_9 > indicators.ema_21 else -1.0  # Cross
+                state[14] = (indicators.ema_9 - indicators.ema_21) / indicators.ema_21 * 100  # Spread
+            ema_50 = getattr(indicators, 'ema_50', None)
+            if ema_50 and indicators.ema_21:
+                state[15] = 1.0 if indicators.ema_21 > ema_50 else -1.0
+                state[16] = (indicators.ema_21 - ema_50) / ema_50 * 100
+            
+            # Volume (17-18)
+            state[17] = min(indicators.volume_ratio / 3.0, 1.0) if indicators.volume_ratio else 0.5
+            state[18] = 1.0 if (indicators.volume_ratio and indicators.volume_ratio > 1.5) else 0.0
+            
+            # DI+/DI- (19-20)
+            state[19] = (indicators.plus_di / 100) if indicators.plus_di else 0
+            state[20] = (indicators.minus_di / 100) if indicators.minus_di else 0
+            
+        except Exception as e:
+            logger.debug(f"[DQN] State build error: {e}")
+        
+        return state
+    
+    def _get_dqn_action(self, indicators: 'IndicatorValues') -> dict:
+        """Get DQN agent's recommended action and confidence.
+        
+        Returns:
+            {'action': int, 'action_name': str, 'confidence': float, 'probs': array}
+        """
+        result = {'action': 0, 'action_name': 'HOLD', 'confidence': 0.33, 'probs': None}
+        
+        if not DQN_AVAILABLE:
+            return result
+        
+        try:
+            state = self._build_dqn_state(indicators)
+            action = dqn_agent.get_action(state, training=False)  # Greedy
+            probs = dqn_agent.get_action_probs(state)
+            
+            result['action'] = action
+            result['action_name'] = dqn_agent.get_action_name(action)
+            result['confidence'] = float(probs[action]) if probs is not None else 0.33
+            result['probs'] = probs
+            result['state'] = state  # Saved for experience replay
+            
+            logger.info(f"[DQN] Action: {result['action_name']} "
+                       f"(confidence={result['confidence']:.2f}, "
+                       f"probs=[H:{probs[0]:.2f} B:{probs[1]:.2f} S:{probs[2]:.2f}])")
+        except Exception as e:
+            logger.debug(f"[DQN] Action error: {e}")
+        
+        return result
+    
+    def _validate_with_ml(self, signal_direction: str, symbol: str, 
+                          df=None, df_htf=None, indicators=None) -> tuple:
+        """Validate technical signal with ML ensemble + HTF trend + sentiment + DQN.
         
         Returns:
             (is_confirmed: bool, confidence_boost: int, reasons: list)
@@ -250,33 +394,94 @@ class SignalGenerator:
         is_confirmed = True
         confidence_boost = 0
         reasons = []
+        ml_cfg = getattr(config, 'ML_VALIDATION_CONFIG', {})
         
-        # Get ML prediction
+        # === Multi-Timeframe Filter ===
+        mtf_config = getattr(config, 'MULTI_TIMEFRAME_CONFIG', {})
+        if MTF_AVAILABLE and mtf_config.get('enabled', True) and df_htf is not None:
+            try:
+                mtf_analyzer = get_multi_timeframe_analyzer()
+                htf_trend = mtf_analyzer.analyze_trend(df_htf)
+                confirms, htf_boost, htf_reason = mtf_analyzer.confirms_direction(
+                    htf_trend, signal_direction
+                )
+                
+                if not confirms:
+                    is_confirmed = False
+                    reasons.append(f"HTF BLOCKED: {htf_reason}")
+                    return is_confirmed, confidence_boost, reasons
+                
+                confidence_boost += htf_boost
+                if htf_boost != 0:
+                    reasons.append(htf_reason)
+            except Exception as e:
+                logger.debug(f"[HTF] Analysis error: {e}")
+        
+        # === Ensemble ML Prediction ===
         ml_pred = self._get_ml_prediction(symbol, df)
+        ml_threshold = ml_cfg.get('ml_confidence_threshold', 60)
+        ml_boost = ml_cfg.get('ml_confirm_boost', 15)
         
-        if ml_pred['confidence'] > 50:
-            # Strong ML prediction
+        if ml_pred['confidence'] > ml_threshold:
             expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
             if ml_pred['direction'] == expected_dir:
-                confidence_boost += 15
-                reasons.append(f"ML confirms {expected_dir} ({ml_pred['confidence']}%)")
+                # Extra boost for ensemble consensus
+                boost = ml_boost + (5 if ml_pred.get('ensemble') else 0)
+                confidence_boost += boost
+                model_label = f"Ensemble" if ml_pred.get('ensemble') else ml_pred['model']
+                reasons.append(f"{model_label} confirms {expected_dir} ({ml_pred['confidence']}%)")
             elif ml_pred['direction'] != 'neutral':
-                # ML disagrees with signal direction
-                is_confirmed = False
-                reasons.append(f"ML conflicts: predicts {ml_pred['direction']}")
+                if ml_cfg.get('ml_block_on_disagree', True):
+                    is_confirmed = False
+                    reasons.append(f"ML conflicts: {ml_pred['model']} predicts {ml_pred['direction']}")
         
-        # Get sentiment
+        # === Sentiment Analysis ===
         sentiment = self._get_sentiment(symbol)
+        sent_threshold = ml_cfg.get('sentiment_score_threshold', 0.3)
+        sent_boost = ml_cfg.get('sentiment_confirm_boost', 10)
+        sent_penalty = ml_cfg.get('sentiment_penalty', -10)
         
-        if abs(sentiment['score']) > 0.2:
+        if abs(sentiment['score']) > sent_threshold:
             expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
             if sentiment['direction'] == expected_dir:
-                confidence_boost += 10
+                confidence_boost += sent_boost
                 reasons.append(f"Sentiment confirms {expected_dir}")
             elif sentiment['direction'] != 'neutral':
-                # Sentiment disagrees
-                confidence_boost -= 10
-                reasons.append(f"Sentiment: {sentiment['direction']}")
+                confidence_boost += sent_penalty
+                reasons.append(f"Sentiment opposes: {sentiment['direction']}")
+        
+        # === DQN Agent Validation ===
+        dqn_cfg = getattr(config, 'DQN_INTEGRATION_CONFIG', {})
+        if DQN_AVAILABLE and dqn_cfg.get('enabled', False) and indicators is not None:
+            try:
+                dqn_result = self._get_dqn_action(indicators)
+                action = dqn_result['action']
+                
+                # Map signal direction to expected DQN action
+                expected_action = 1 if 'LONG' in signal_direction.upper() else 2  # BUY=1, SELL=2
+                
+                if action == expected_action:
+                    # DQN agrees with signal
+                    boost = dqn_cfg.get('dqn_confirm_boost', 10)
+                    confidence_boost += boost
+                    reasons.append(f"DQN confirms {dqn_result['action_name']} "
+                                 f"({dqn_result['confidence']:.0%})")
+                elif action == 0:  # HOLD
+                    penalty = dqn_cfg.get('dqn_hold_penalty', -5)
+                    confidence_boost += penalty
+                    reasons.append(f"DQN suggests HOLD ({dqn_result['confidence']:.0%})")
+                else:
+                    # DQN opposes (wants opposite direction)
+                    penalty = dqn_cfg.get('dqn_oppose_penalty', -15)
+                    confidence_boost += penalty
+                    reasons.append(f"DQN opposes: wants {dqn_result['action_name']} "
+                                 f"({dqn_result['confidence']:.0%})")
+                
+                # Store DQN state for experience replay (used by run_system.py)
+                self._last_dqn_state = dqn_result.get('state')
+                self._last_dqn_action = action
+            except Exception as e:
+                logger.debug(f"[DQN] Validation error: {e}")
         
         return is_confirmed, confidence_boost, reasons
     
@@ -390,7 +595,8 @@ class SignalGenerator:
     
     def generate_signal(self, symbol: str, 
                         indicators: IndicatorValues,
-                        df: 'pd.DataFrame' = None) -> TradeSignal:
+                        df: 'pd.DataFrame' = None,
+                        df_htf: 'pd.DataFrame' = None) -> TradeSignal:
         """
         Generate trading signal based on technical indicators.
         
@@ -483,7 +689,7 @@ class SignalGenerator:
         
         # === ML VALIDATION: Confirm signal with AI predictions ===
         direction = "LONG" if is_long else "SHORT"
-        ml_confirmed, ml_boost, ml_reasons = self._validate_with_ml(direction, symbol, df)
+        ml_confirmed, ml_boost, ml_reasons = self._validate_with_ml(direction, symbol, df, df_htf, indicators=indicators)
         
         if not ml_confirmed:
             # ML strongly disagrees with the signal
