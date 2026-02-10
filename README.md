@@ -397,6 +397,7 @@ MIT
 
 ## 🔗 Links
 
+- [Profitability Roadmap](ROADMAP.md)
 - [Delta Exchange API Docs](https://docs.delta.exchange/)
 - [Lag-Llama Paper](https://arxiv.org/abs/2310.08278)
 - [FinBERT](https://huggingface.co/ProsusAI/finbert)
