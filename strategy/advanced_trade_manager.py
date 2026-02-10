@@ -247,11 +247,12 @@ class RiskManager:
                    f"MaxRisk={self.max_risk_per_trade*100}%, MaxPos={self.max_positions}")
     
     def calculate_position_size(self, entry_price: float, stop_loss: float, 
-                               symbol: str = "BTCUSD") -> float:
+                               symbol: str = "BTCUSD", confidence: int = 0) -> float:
         """
         Calculate position size using DYNAMIC percentage-based risk.
         Uses RISK_PER_TRADE (2%) of CURRENT balance for safe small account trading.
-        Position Size = (Balance × Risk%) / |Entry - Stop Loss|
+        Scales risk based on signal confluence (confidence score).
+        Position Size = (Balance × Risk% × Multiplier) / |Entry - Stop Loss|
         """
         if stop_loss == 0 or entry_price == 0:
             logger.warning("Invalid prices for position sizing")
@@ -264,10 +265,31 @@ class RiskManager:
             # Risk 2% of current balance per trade
             risk_pct = getattr(config, 'RISK_PER_TRADE', 0.02)
             risk_amount = self.account_balance * risk_pct
-            logger.info(f"[DYNAMIC] Risk: {risk_pct*100}% of ${self.account_balance:.2f} = ${risk_amount:.2f}")
+            logger.info(f"[DYNAMIC] Base risk: {risk_pct*100}% of ${self.account_balance:.2f} = ${risk_amount:.2f}")
         else:
             # Fallback: Fixed USD risk amount
             risk_amount = getattr(config, 'RISK_AMOUNT_USD', 2)
+        
+        # === CONFLUENCE-BASED SCALING ===
+        sizing_cfg = getattr(config, 'DYNAMIC_SIZING_CONFIG', {})
+        if sizing_cfg.get('enabled', False) and confidence > 0:
+            tiers = sizing_cfg.get('confluence_tiers', {})
+            max_risk_pct = sizing_cfg.get('max_risk_pct', 0.05)
+            
+            # Find the applicable multiplier tier
+            multiplier = 1.0
+            for threshold in sorted(tiers.keys(), reverse=True):
+                if confidence >= int(threshold):
+                    multiplier = tiers[threshold]
+                    break
+            
+            # Apply multiplier
+            scaled_risk = risk_amount * multiplier
+            max_risk = self.account_balance * max_risk_pct
+            risk_amount = min(scaled_risk, max_risk)
+            
+            logger.info(f"[CONFLUENCE] Confidence={confidence}, Multiplier={multiplier}x, "
+                       f"Scaled risk=${risk_amount:.2f}")
         
         # Minimum trade size check
         min_trade = getattr(config, 'MIN_TRADE_SIZE_USD', 1.0)
@@ -777,9 +799,10 @@ class AdvancedTradeManager:
                 logger.warning(f"[VALIDATION] SHORT TP ${take_profit:.2f} >= entry ${entry_price:.2f}, fixing...")
                 take_profit = entry_price - 3 * atr
         
-        # Calculate position size
+        # Calculate position size with confluence-based scaling
+        signal_confidence = getattr(signal, 'confidence', 0)
         position_size = self.risk_manager.calculate_position_size(
-            entry_price, stop_loss, signal.symbol
+            entry_price, stop_loss, signal.symbol, confidence=signal_confidence
         )
         
         if position_size <= 0:

@@ -23,6 +23,13 @@ from api.delta_rest import rest_client
 from api.delta_websocket import ws_client
 from ui.dashboard import dashboard
 
+# DQN Agent (optional)
+try:
+    from ml.agents.dqn_trader import dqn_agent
+    DQN_AVAILABLE = True
+except ImportError:
+    DQN_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +71,17 @@ class IntegratedTradingSystem:
         # Store indicators and signals
         self._indicators = {}
         self._signals = {}
+        self._htf_data = {}  # Higher timeframe DataFrames per symbol
+        
+        # Multi-timeframe config
+        self._mtf_config = getattr(config, 'MULTI_TIMEFRAME_CONFIG', {})
+        self._htf_timeframe = self._mtf_config.get('higher_timeframe', '1h')
+        self._htf_lookback = self._mtf_config.get('htf_lookback_hours', 24)
+        
+        # DQN tracking
+        self._dqn_config = getattr(config, 'DQN_INTEGRATION_CONFIG', {})
+        self._dqn_entry_states = {}  # trade_id -> (state, action)
+        self._dqn_trades_completed = 0
         
         # Signal handlers
         sig.signal(sig.SIGINT, self._signal_handler)
@@ -113,6 +131,7 @@ class IntegratedTradingSystem:
                         trade_id, exit_reason, current_price
                     )
                     if closed_trade:
+                        self._feed_dqn_reward(closed_trade)
                         dashboard.update(
                             message=f"🎯 {exit_reason.value}: {symbol} @ ${current_price:,.2f} | "
                                    f"P&L: ${closed_trade.realized_pnl:+.2f} ({closed_trade.pnl_percent:+.2f}%)"
@@ -152,6 +171,7 @@ class IntegratedTradingSystem:
                         trade_id, exit_reason, ind.price
                     )
                     if closed_trade:
+                        self._feed_dqn_reward(closed_trade)
                         dashboard.update(
                             message=f"EXIT: {symbol} - {exit_reason.value} "
                                    f"P&L: ${closed_trade.realized_pnl:+.2f} "
@@ -161,7 +181,8 @@ class IntegratedTradingSystem:
         
         # Generate entry signal if no open position for this symbol
         if not self.trade_manager.has_open_position(symbol):
-            signal = signal_generator.generate_signal(symbol, ind, df)
+            df_htf = self._htf_data.get(symbol)  # Higher timeframe data
+            signal = signal_generator.generate_signal(symbol, ind, df, df_htf=df_htf)
             self._signals[symbol] = signal
             
             if signal.is_actionable():
@@ -174,6 +195,14 @@ class IntegratedTradingSystem:
         trade = self.trade_manager.create_trade_from_signal(signal, indicators)
         
         if trade:
+            # Store DQN entry state for experience replay
+            if DQN_AVAILABLE and self._dqn_config.get('train_on_outcomes', False):
+                entry_state = getattr(signal_generator, '_last_dqn_state', None)
+                entry_action = getattr(signal_generator, '_last_dqn_action', None)
+                if entry_state is not None:
+                    self._dqn_entry_states[trade.trade_id] = (entry_state, entry_action)
+                    logger.info(f"[DQN] Stored entry state for trade {trade.trade_id}")
+            
             dashboard.update(
                 message=f"TRADE: {trade.direction.value} {trade.symbol} "
                        f"@ ${trade.entry_price:,.2f} | Size: {trade.entry_size:.4f} | "
@@ -181,18 +210,104 @@ class IntegratedTradingSystem:
             )
             dashboard.print_signal_alert(signal)
     
+    def _feed_dqn_reward(self, closed_trade):
+        """Feed trade outcome to DQN agent for online learning."""
+        if not DQN_AVAILABLE or not self._dqn_config.get('train_on_outcomes', False):
+            return
+        
+        trade_id = closed_trade.trade_id
+        entry_data = self._dqn_entry_states.pop(trade_id, None)
+        if entry_data is None:
+            return
+        
+        entry_state, action = entry_data
+        
+        try:
+            # Calculate reward from PnL
+            pnl_pct = closed_trade.pnl_percent
+            current_position = 1 if closed_trade.is_long else -1
+            reward = dqn_agent.calculate_reward(action or 0, pnl_pct, current_position)
+            
+            # Build next state from latest indicators
+            import numpy as np
+            ind = self._indicators.get(closed_trade.symbol)
+            if ind is not None:
+                next_state = signal_generator._build_dqn_state(ind)
+            else:
+                next_state = np.zeros(50, dtype=np.float32)
+            
+            # Store experience and train
+            dqn_agent.store_experience(entry_state, action or 0, reward, next_state, done=True)
+            loss = dqn_agent.train_step()
+            
+            self._dqn_trades_completed += 1
+            logger.info(f"[DQN] Trade {trade_id} feedback: reward={reward:.3f}, "
+                       f"PnL={pnl_pct:+.2f}%, loss={loss:.4f if loss else 'N/A'}, "
+                       f"epsilon={dqn_agent.epsilon:.3f}")
+            
+            # Periodic save
+            save_freq = self._dqn_config.get('save_every_n_trades', 10)
+            if self._dqn_trades_completed % save_freq == 0:
+                dqn_agent.save()
+                logger.info(f"[DQN] Model saved after {self._dqn_trades_completed} trades")
+        
+        except Exception as e:
+            logger.warning(f"[DQN] Reward feedback error: {e}")
+    
     def _load_historical_data(self):
-        """Load historical candles for all symbols."""
+        """Load historical candles for all symbols (primary + higher TF)."""
         print("[SYSTEM] Loading historical data...")
         for symbol in self.symbols:
+            # Load primary timeframe (e.g., 5m)
             success = market_data.load_historical_candles(
                 symbol=symbol,
                 resolution=self.timeframe,
                 lookback_hours=24
             )
+            
+            # Load higher timeframe (e.g., 1h) for multi-TF analysis
+            if self._mtf_config.get('enabled', True):
+                self._load_htf_data(symbol)
+            
             if success:
                 self._analyze_and_trade(symbol)
         print("[SYSTEM] Historical data loaded")
+    
+    def _load_htf_data(self, symbol: str):
+        """Load higher timeframe candles for multi-timeframe analysis."""
+        try:
+            import pandas as pd
+            end_time = int(time.time())
+            start_time = end_time - (self._htf_lookback * 3600)
+            
+            response = rest_client.get_candles(
+                symbol=symbol,
+                resolution=self._htf_timeframe,
+                start=start_time,
+                end=end_time
+            )
+            
+            if 'result' in response and response['result']:
+                candles = response['result']
+                data = []
+                for c in candles:
+                    data.append({
+                        'timestamp': c.get('time', 0),
+                        'open': float(c.get('open', 0)),
+                        'high': float(c.get('high', 0)),
+                        'low': float(c.get('low', 0)),
+                        'close': float(c.get('close', 0)),
+                        'volume': float(c.get('volume', 0))
+                    })
+                
+                df_htf = pd.DataFrame(data)
+                if not df_htf.empty:
+                    df_htf['datetime'] = pd.to_datetime(df_htf['timestamp'], unit='us')
+                    df_htf.set_index('datetime', inplace=True)
+                    self._htf_data[symbol] = df_htf
+                    logger.info(f"[HTF] Loaded {len(df_htf)} {self._htf_timeframe} candles for {symbol}")
+        except Exception as e:
+            logger.warning(f"[HTF] Failed to load data for {symbol}: {e}")
     
     def _setup_websocket(self):
         """Setup WebSocket connections."""

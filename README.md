@@ -5,16 +5,19 @@ A **production-ready** quantitative trading system for Delta Exchange with **AI/
 ## ✨ Features
 
 ### 🤖 AI/ML Trading Intelligence
+- **Ensemble AI Voting**: Parallel LSTM + Lag-Llama predictions with consensus bonuses
 - **Lag-Llama Forecaster**: Time series foundation model for price predictions
 - **LSTM Predictor**: Bidirectional LSTM with attention mechanism
 - **FinBERT Sentiment**: Financial news sentiment analysis (local & cloud)
 - **Hugging Face Inference API**: Cloud-based AI models for sentiment and classification
-- **DQN Trading Agent**: Deep Q-Network reinforcement learning for optimal actions
+- **DQN Trading Agent**: Deep Q-Network integrated into signal pipeline with online learning
 - **Adaptive Learning**: Learns from trade history to improve decisions
 
 ### 📈 Advanced Trading Strategies
 - **Momentum Trading**: 200x leverage with risk management
 - **Low Volatility Strategy**: Range trading for sideways markets (mean reversion)
+- **Multi-Timeframe Confirmation**: 1h trend filter blocks trades against dominant trend
+- **Dynamic Position Sizing**: Confluence-based risk scaling (1x–2.5x by confidence)
 - **Limit Orders**: Uses maker orders (0.02% fees vs 0.05% taker)
 - **Auto-Topup**: Prevents liquidation by adding margin automatically
 - **Trailing Stops**: Activates after 0.5% profit to lock in gains
@@ -23,7 +26,8 @@ A **production-ready** quantitative trading system for Delta Exchange with **AI/
 ### 📊 Technical Analysis
 - **Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX, EMA/SMA
 - **Market Regime Detection**: Auto-detects trending vs ranging markets
-- **Signal Validation**: ML confirms technical signals before entry
+- **Signal Validation**: Ensemble ML + DQN confirm technical signals before entry
+- **Multi-Timeframe Analysis**: Higher timeframe EMA/ADX/RSI trend filtering
 - **Confidence Scores**: 0-100% confidence on every signal
 
 ### 🖥️ Real-Time Dashboard
@@ -150,17 +154,32 @@ HF_TOKEN=hf_your_token_here
 - News summarization
 
 ### 5. DQN Trading Agent
-Deep Q-Network for reinforcement learning-based trading.
+Deep Q-Network for reinforcement learning-based trading, **fully integrated into the signal pipeline**.
 
 **Features:**
 - State: 50 features (indicators + price data)
 - Actions: Buy, Sell, Hold
-- Experience replay buffer
-- Epsilon-greedy exploration
+- **Signal validation**: +10 boost when DQN confirms, -15 penalty when opposing
+- **Online learning**: Trains from live trade outcomes via experience replay
+- Periodic model saving every 10 completed trades
 
-### Model Fallback Chain
 ```
-Lag-Llama → LSTM → HF Inference → Momentum → Technical Only
+[DQN] Action: BUY (confidence=0.72, probs=[H:0.15 B:0.72 S:0.13])
+[DQN] Trade T1707500000 feedback: reward=0.250, PnL=+1.25%
+```
+
+### Model Pipeline
+```
+Technical Analysis → Confidence Score
+  → Multi-TF Filter (1h trend)
+  → Ensemble ML (LSTM + Lag-Llama parallel)
+    → Consensus bonus +20% or split penalty
+  → Sentiment (FinBERT, threshold 0.3)
+  → DQN Agent (entry/exit timing)
+  → SMC + Market Analysis
+  → Dynamic Position Sizing (1x–2.5x)
+  → Trade Execution
+  → DQN learns from outcome (online RL)
 ```
 
 ---
@@ -169,9 +188,9 @@ Lag-Llama → LSTM → HF Inference → Momentum → Technical Only
 
 ```
 delta_anti/
-├── run_system.py              # Main entry point
+├── run_system.py              # Main entry point (HTF data + DQN feedback)
 ├── main.py                    # Alternative entry with UI
-├── config.py                  # Configuration
+├── config.py                  # Configuration (ML, ensemble, DQN, sizing)
 ├── .env                       # API credentials
 │
 ├── api/
@@ -185,7 +204,7 @@ delta_anti/
 │   │   ├── lstm_predictor.py      # LSTM model
 │   │   └── lag_llama_predictor.py # Lag-Llama model
 │   ├── agents/
-│   │   └── dqn_trader.py          # DQN reinforcement learning
+│   │   └── dqn_trader.py          # DQN RL agent (pipeline-integrated)
 │   ├── features/
 │   │   └── feature_engineer.py    # 100+ features
 │   └── sentiment/
@@ -193,10 +212,13 @@ delta_anti/
 │
 ├── analysis/
 │   ├── indicators.py          # Technical indicators
-│   └── signals.py             # Signal generation + ML validation
+│   ├── signals.py             # Signal generation + ensemble + DQN
+│   ├── multi_timeframe.py     # Higher timeframe trend analysis
+│   └── smart_money.py         # SMC: order blocks, FVGs, liquidity
 │
 ├── strategy/
-│   ├── advanced_trade_manager.py  # Trade execution
+│   ├── advanced_trade_manager.py  # Trade execution + dynamic sizing
+│   ├── risk_manager.py            # Risk management
 │   ├── range_strategy.py          # Low volatility strategy
 │   └── trade_analyzer.py          # Adaptive learning
 │
@@ -305,11 +327,14 @@ Uses **limit orders** to reduce fees:
 
 ## 🛡️ Risk Management
 
-1. **Daily Loss Limit**: 50% (configurable)
-2. **Max Drawdown**: 70%
-3. **Auto-Topup**: Uses wallet balance to prevent liquidation
-4. **Trailing Stop**: Activates after 0.5% profit
-5. **Trade Cooldown**: Prevents overtrading
+1. **Dynamic Position Sizing**: 1x–2.5x risk scaling based on signal confluence
+2. **Daily Loss Limit**: 50% (configurable)
+3. **Max Drawdown**: 70%
+4. **Multi-Timeframe Filter**: Blocks trades against 1h dominant trend
+5. **Auto-Topup**: Uses wallet balance to prevent liquidation
+6. **Trailing Stop**: Activates after 0.5% profit
+7. **Trade Cooldown**: Prevents overtrading
+8. **Ensemble Consensus**: Requires ML model agreement for high-confidence trades
 
 ---
 
