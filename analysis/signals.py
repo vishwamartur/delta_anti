@@ -480,7 +480,7 @@ class SignalGenerator:
             elif ml_pred['direction'] != 'neutral':
                 if ml_cfg.get('ml_block_on_disagree', True):
                     is_confirmed = False
-                    reasons.append(f"ML conflicts: {ml_pred['model']} predicts {ml_pred['direction']}")
+                    reasons.append(f"ML REJECTS: {ml_pred['model']} predicts {ml_pred['direction']}")
         
         # === Sentiment Analysis ===
         sentiment = self._get_sentiment(symbol)
@@ -505,7 +505,7 @@ class SignalGenerator:
             expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
             if sentiment['direction'] == expected_dir:
                 confidence_boost += sent_boost
-                reasons.append(f"Sentiment confirms {expected_dir}")
+                reasons.append(f"Sentiment supports {expected_dir}")
             elif sentiment['direction'] != 'neutral':
                 confidence_boost += sent_penalty
                 reasons.append(f"Sentiment opposes: {sentiment['direction']}")
@@ -524,7 +524,7 @@ class SignalGenerator:
                     # DQN agrees with signal
                     boost = dqn_cfg.get('dqn_confirm_boost', 10)
                     confidence_boost += boost
-                    reasons.append(f"DQN confirms {dqn_result['action_name']} "
+                    reasons.append(f"DQN supports {dqn_result['action_name']} "
                                  f"({dqn_result['confidence']:.0%})")
                 elif action == 0:  # HOLD
                     penalty = dqn_cfg.get('dqn_hold_penalty', -5)
