@@ -8,6 +8,10 @@ import sys
 import os
 import time
 import signal as sig
+import warnings
+
+# Suppress PyTorch/GluonTS warning
+warnings.filterwarnings("ignore", "Using a non-tuple sequence for multidimensional indexing is deprecated")
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -29,6 +33,20 @@ try:
     DQN_AVAILABLE = True
 except ImportError:
     DQN_AVAILABLE = False
+
+# Adaptive Strategy Selector
+try:
+    from strategy.selector import get_strategy_selector
+    SELECTOR_AVAILABLE = True
+except ImportError:
+    SELECTOR_AVAILABLE = False
+
+# Model Accuracy Tracking
+try:
+    from analysis.model_accuracy import get_accuracy_tracker
+    ACCURACY_TRACKING_AVAILABLE = True
+except ImportError:
+    ACCURACY_TRACKING_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -83,6 +101,18 @@ class IntegratedTradingSystem:
         self._dqn_entry_states = {}  # trade_id -> (state, action)
         self._dqn_trades_completed = 0
         
+        # Accuracy tracking
+        if ACCURACY_TRACKING_AVAILABLE:
+            self.accuracy_tracker = get_accuracy_tracker()
+        else:
+            self.accuracy_tracker = None
+            
+        # Strategy Selector
+        if SELECTOR_AVAILABLE:
+            self.strategy_selector = get_strategy_selector()
+        else:
+            self.strategy_selector = None
+        
         # Signal handlers
         sig.signal(sig.SIGINT, self._signal_handler)
         sig.signal(sig.SIGTERM, self._signal_handler)
@@ -132,6 +162,7 @@ class IntegratedTradingSystem:
                     )
                     if closed_trade:
                         self._feed_dqn_reward(closed_trade)
+                        self._record_trade_outcome(closed_trade)
                         dashboard.update(
                             message=f"🎯 {exit_reason.value}: {symbol} @ ${current_price:,.2f} | "
                                    f"P&L: ${closed_trade.realized_pnl:+.2f} ({closed_trade.pnl_percent:+.2f}%)"
@@ -172,6 +203,7 @@ class IntegratedTradingSystem:
                     )
                     if closed_trade:
                         self._feed_dqn_reward(closed_trade)
+                        self._record_trade_outcome(closed_trade)
                         dashboard.update(
                             message=f"EXIT: {symbol} - {exit_reason.value} "
                                    f"P&L: ${closed_trade.realized_pnl:+.2f} "
@@ -179,10 +211,48 @@ class IntegratedTradingSystem:
                         )
                     return
         
-        # Generate entry signal if no open position for this symbol
+        # Generate entry signal using Adaptive Strategy Selector
         if not self.trade_manager.has_open_position(symbol):
-            df_htf = self._htf_data.get(symbol)  # Higher timeframe data
-            signal = signal_generator.generate_signal(symbol, ind, df, df_htf=df_htf)
+            df_htf = self._htf_data.get(symbol)
+            
+            # Analyze market condition first (needed for selector)
+            # We need to access the market analyzer instance from signal_generator or create one
+            # The signal_generator has a lazy-loaded one we can use/access
+            market_condition = None
+            if hasattr(signal_generator, 'market_analyzer') and signal_generator.market_analyzer:
+                 market_condition = signal_generator.market_analyzer.analyze_market(symbol, df, ind)
+            
+            # If we can't get condition easily, we might need to instantiate analyzer here 
+            # or rely on the selector to do it.
+            # Actually, let's look at how signal_generator does it.
+            # It calls market_analyzer internally.
+            # The selector needs market_condition as input.
+            
+            # Let's instantiate a local analyzer if needed, or better, 
+            # let's make the selector do the heavy lifting if we pass it the components.
+            # But the selector signature is: select_and_generate(symbol, indicators, market_condition, df, df_htf)
+            
+            # So we MUST get the market_condition first.
+            from analysis.market_analyzer import MarketAnalyzer
+            if not hasattr(self, '_market_analyzer'):
+                self._market_analyzer = MarketAnalyzer()
+            
+            market_condition = self._market_analyzer.analyze_market(symbol, df, ind)
+            
+            if self.strategy_selector:
+                result = self.strategy_selector.select_and_generate(
+                    symbol, ind, market_condition, df, df_htf
+                )
+                signal = result.signal
+                strategy_name = result.strategy_name
+                regime = result.regime
+                
+                if signal.is_actionable():
+                    logger.info(f"[STRATEGY] Selected {strategy_name} for {symbol} ({regime.value})")
+            else:
+                # Fallback
+                signal = signal_generator.generate_signal(symbol, ind, df, df_htf=df_htf)
+            
             self._signals[symbol] = signal
             
             if signal.is_actionable():
@@ -253,6 +323,46 @@ class IntegratedTradingSystem:
         
         except Exception as e:
             logger.warning(f"[DQN] Reward feedback error: {e}")
+
+    def _record_trade_outcome(self, closed_trade):
+        """Record trade outcome for model accuracy tracking."""
+        if not self.accuracy_tracker:
+            return
+            
+        try:
+            direction = "bullish" if closed_trade.is_long else "bearish"
+            # If PnL > 0, the prediction was correct for that direction
+            # If PnL < 0, the prediction was incorrect
+            # Actually, record_outcome expects the direction that WON.
+            
+            actual_direction = direction if closed_trade.realized_pnl > 0 else ("bearish" if closed_trade.is_long else "bullish")
+            
+            self.accuracy_tracker.record_outcome(closed_trade.trade_id, actual_direction)
+            logger.info(f"[ACCURACY] Recorded outcome for {closed_trade.trade_id}: {actual_direction} (PnL {closed_trade.pnl_percent:.2f}%)")
+            
+        except Exception as e:
+            logger.warning(f"[ACCURACY] Recording error: {e}")
+
+    def _record_trade_outcome(self, closed_trade):
+        """Record trade outcome for model accuracy tracking."""
+        if not self.accuracy_tracker:
+            return
+            
+        try:
+            direction = "bullish" if closed_trade.is_long else "bearish"
+            # If PnL > 0, the prediction was correct for that direction
+            # If PnL < 0, the prediction was incorrect
+            # Actually, record_outcome expects the direction that WON.
+            # If we went LONG (bullish) and WON, actual was bullish.
+            # If we went LONG (bullish) and LOST, actual was bearish.
+            
+            actual_direction = direction if closed_trade.realized_pnl > 0 else ("bearish" if closed_trade.is_long else "bullish")
+            
+            self.accuracy_tracker.record_outcome(closed_trade.trade_id, actual_direction)
+            logger.info(f"[ACCURACY] Recorded outcome for {closed_trade.trade_id}: {actual_direction} (PnL {closed_trade.pnl_percent:.2f}%)")
+            
+        except Exception as e:
+            logger.warning(f"[ACCURACY] Recording error: {e}")
     
     def _load_historical_data(self):
         """Load historical candles for all symbols (primary + higher TF)."""

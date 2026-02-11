@@ -164,6 +164,25 @@ ML_VALIDATION_CONFIG = {
     "sentiment_penalty": -10,           # Confidence penalty when sentiment disagrees
 }
 
+# ============ Adaptive Strategy Configuration ============
+ADAPTIVE_STRATEGY_CONFIG = {
+    "enabled": True,
+    "regime_lookback": 20,              # Candles to look back for regime detection
+    "adx_trend_threshold": 25,          # ADX > 25 = Trending
+    "adx_range_threshold": 20,          # ADX < 20 = Ranging
+    "bb_squeeze_threshold": 3.0,        # BB Width < 3% = Low Volatility/Range
+    "volatility_penalty": 20,           # Confidence penalty in high volatility
+}
+
+# ============ Backtesting Configuration ============
+BACKTEST_CONFIG = {
+    "initial_balance": 10000.0,         # Start with $10,000
+    "commission_rate": 0.0006,          # 0.06% taker fee
+    "slippage_pct": 0.0002,             # 0.02% slippage assumption
+    "use_fixed_size": False,            # If True, use fixed quantity. If False, use adaptive dynamic sizing.
+    "fixed_position_size": 1.0,         # 1.0 BTC if fixed
+}
+
 # ============ Multi-Timeframe Configuration ============
 MULTI_TIMEFRAME_CONFIG = {
     "enabled": True,
@@ -206,6 +225,17 @@ DQN_INTEGRATION_CONFIG = {
     "dqn_oppose_penalty": -15,          # Penalty when DQN opposes direction
     "train_on_outcomes": True,          # Enable online learning from trade results
     "save_every_n_trades": 10,          # Save DQN model every N completed trades
+}
+
+# ============ Model Accuracy Weighting ============
+MODEL_ACCURACY_CONFIG = {
+    "enabled": True,
+    "window_size": 50,              # Rolling window of trades to track
+    "min_trades": 10,               # Min trades before adjusting weights
+    "base_weight": 1.0,             # Default weight multiplier
+    "max_weight": 1.5,              # Max boost for high-accuracy models
+    "min_weight": 0.3,              # Min weight for poor-accuracy models
+    "save_path": "models/model_accuracy.json",
 }
 
 # ============ API Server Configuration ============

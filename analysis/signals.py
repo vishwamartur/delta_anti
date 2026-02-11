@@ -66,6 +66,13 @@ try:
 except ImportError:
     DQN_AVAILABLE = False
 
+# Model Accuracy Tracking
+try:
+    from analysis.model_accuracy import get_accuracy_tracker
+    ACCURACY_TRACKING_AVAILABLE = True
+except ImportError:
+    ACCURACY_TRACKING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,6 +134,12 @@ class SignalGenerator:
         self.market_config = getattr(config, 'MARKET_ANALYSIS_CONFIG', {'enabled': True})
         self._analyzer = None  # Lazy load
         self._market_analyzer = None  # Lazy load
+
+        # Initialize Accuracy Tracker
+        if ACCURACY_TRACKING_AVAILABLE:
+            self.accuracy_tracker = get_accuracy_tracker()
+        else:
+            self.accuracy_tracker = None
         
     @property
     def analyzer(self):
@@ -207,14 +220,30 @@ class SignalGenerator:
                 lag_llama = get_lag_llama_predictor()
                 signal = lag_llama.get_trading_signal(df, symbol)
                 if signal and signal.get('confidence', 0) > 0:
+                    # Apply accuracy weighting
+                    weight = 1.0
+                    if self.accuracy_tracker:
+                        # Record prediction
+                        self.accuracy_tracker.record_prediction(
+                            f"{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}", 
+                            'lag-llama', 
+                            signal['direction']
+                        )
+                        weight = self.accuracy_tracker.get_weight('lag-llama')
+                    
+                    raw_conf = int(signal['confidence'] * 100)
+                    weighted_conf = min(100, int(raw_conf * weight))
+                    
                     predictions.append({
                         'direction': signal['direction'],
-                        'confidence': int(signal['confidence'] * 100),
+                        'confidence': weighted_conf,
+                        'raw_confidence': raw_conf,
                         'change_pct': signal.get('change_pct', 0),
-                        'model': 'lag-llama'
+                        'model': 'lag-llama',
+                        'weight': weight
                     })
                     logger.info(f"[ENSEMBLE:LAG-LLAMA] {symbol}: {signal['direction']} "
-                               f"({int(signal['confidence']*100)}%)")
+                               f"({weighted_conf}% [raw {raw_conf}% x {weight}x])")
             except Exception as e:
                 logger.debug(f"[ENSEMBLE:LAG-LLAMA] Error: {e}")
         
@@ -225,13 +254,31 @@ class SignalGenerator:
                 if prediction:
                     direction_map = {'up': 'bullish', 'down': 'bearish', 'neutral': 'neutral'}
                     lstm_dir = direction_map.get(prediction.direction.lower(), 'neutral')
+                    
+                    # Apply accuracy weighting
+                    weight = 1.0
+                    if self.accuracy_tracker:
+                        # Record prediction
+                        self.accuracy_tracker.record_prediction(
+                            f"{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}", 
+                            'lstm', 
+                            lstm_dir
+                        )
+                        weight = self.accuracy_tracker.get_weight('lstm')
+                    
+                    raw_conf = int(prediction.confidence)
+                    weighted_conf = min(100, int(raw_conf * weight))
+                    
                     predictions.append({
                         'direction': lstm_dir,
-                        'confidence': int(prediction.confidence),
+                        'confidence': weighted_conf,
+                        'raw_confidence': raw_conf,
                         'change_pct': prediction.predicted_change_pct,
-                        'model': 'lstm'
+                        'model': 'lstm',
+                        'weight': weight
                     })
-                    logger.info(f"[ENSEMBLE:LSTM] {symbol}: {lstm_dir} ({int(prediction.confidence)}%)")
+                    logger.info(f"[ENSEMBLE:LSTM] {symbol}: {lstm_dir} "
+                               f"({weighted_conf}% [raw {raw_conf}% x {weight}x])")
             except Exception as e:
                 logger.debug(f"[ENSEMBLE:LSTM] Error: {e}")
         
@@ -433,7 +480,7 @@ class SignalGenerator:
             elif ml_pred['direction'] != 'neutral':
                 if ml_cfg.get('ml_block_on_disagree', True):
                     is_confirmed = False
-                    reasons.append(f"ML conflicts: {ml_pred['model']} predicts {ml_pred['direction']}")
+                    reasons.append(f"ML REJECTS: {ml_pred['model']} predicts {ml_pred['direction']}")
         
         # === Sentiment Analysis ===
         sentiment = self._get_sentiment(symbol)
@@ -441,11 +488,24 @@ class SignalGenerator:
         sent_boost = ml_cfg.get('sentiment_confirm_boost', 10)
         sent_penalty = ml_cfg.get('sentiment_penalty', -10)
         
+        # Apply accuracy weighting to sentiment
+        if self.accuracy_tracker:
+            weight = self.accuracy_tracker.get_weight('sentiment')
+            sent_boost = int(sent_boost * weight)
+            # Record prediction
+            if sentiment['direction'] != 'neutral':
+                self.accuracy_tracker.record_prediction(
+                    f"{symbol}_{datetime.now().strftime('%Y%m%d%H%M')}", 
+                    'sentiment', 
+                    sentiment['direction']
+                )
+
+        
         if abs(sentiment['score']) > sent_threshold:
             expected_dir = 'bullish' if 'LONG' in signal_direction.upper() else 'bearish'
             if sentiment['direction'] == expected_dir:
                 confidence_boost += sent_boost
-                reasons.append(f"Sentiment confirms {expected_dir}")
+                reasons.append(f"Sentiment supports {expected_dir}")
             elif sentiment['direction'] != 'neutral':
                 confidence_boost += sent_penalty
                 reasons.append(f"Sentiment opposes: {sentiment['direction']}")
@@ -464,7 +524,7 @@ class SignalGenerator:
                     # DQN agrees with signal
                     boost = dqn_cfg.get('dqn_confirm_boost', 10)
                     confidence_boost += boost
-                    reasons.append(f"DQN confirms {dqn_result['action_name']} "
+                    reasons.append(f"DQN supports {dqn_result['action_name']} "
                                  f"({dqn_result['confidence']:.0%})")
                 elif action == 0:  # HOLD
                     penalty = dqn_cfg.get('dqn_hold_penalty', -5)
@@ -703,7 +763,7 @@ class SignalGenerator:
                 stop_loss=0,
                 take_profit=0,
                 timestamp=datetime.now(),
-                reasons=[f"ML CONFLICT: {', '.join(ml_reasons)}"],
+                reasons=ml_reasons,
                 indicators=indicators
             )
         
