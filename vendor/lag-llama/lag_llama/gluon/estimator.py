@@ -162,7 +162,7 @@ class LagLlamaEstimator(PyTorchLightningEstimator):
         validation_sampler: Optional[InstanceSampler] = None,
         time_feat: bool = False,
         dropout: float = 0.0,
-        lags_seq: list = ["Q", "M", "W", "D", "H", "T", "S"],
+        lags_seq: list = ["M", "W", "D", "H", "T", "S"],
         data_id_to_name_map: dict = {},
         use_cosine_annealing_lr: bool = False,
         cosine_annealing_lr_args: dict = {},

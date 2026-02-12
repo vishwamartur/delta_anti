@@ -459,15 +459,15 @@ def _create_lstm_predictor():
         if os.path.exists(path):
             try:
                 predictor.load(path)
-                print(f"[ML] ✓ Auto-loaded trained LSTM from {path}")
+                print(f"[ML] [OK] Auto-loaded trained LSTM from {path}")
                 print(f"[ML]   Trained: {predictor.is_trained}, "
                       f"History: {len(predictor.training_history)} epochs")
                 break
             except Exception as e:
-                print(f"[ML] ⚠ Failed to load {path}: {e}")
+                print(f"[ML] [WARNING] Failed to load {path}: {e}")
                 continue
     else:
-        print("[ML] ℹ No trained LSTM model found. Run train_lstm.py to train.")
+        print("[ML] [INFO] No trained LSTM model found. Run train_lstm.py to train.")
     
     return predictor
 
