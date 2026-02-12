@@ -18,7 +18,7 @@ TRADING_SYMBOLS = os.getenv("TRADING_SYMBOLS", "BTCUSD,ETHUSD").split(",")
 DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "5m")
 
 # Risk Management - Conservative for $100 wallet
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))  # 2% risk per trade
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.10"))  # 10% risk per trade
 RISK_AMOUNT_USD = float(os.getenv("RISK_AMOUNT_USD", "2"))  # Fixed $2 risk per trade (fallback)
 MAX_POSITION_SIZE = int(os.getenv("MAX_POSITION_SIZE", "100"))
 MAX_DAILY_TRADES = 20  # More trades allowed
@@ -206,8 +206,8 @@ ENSEMBLE_CONFIG = {
 # ============ Dynamic Position Sizing (Confluence) ============
 DYNAMIC_SIZING_CONFIG = {
     "enabled": True,
-    "base_risk_pct": 0.02,              # Base 2% risk
-    "max_risk_pct": 0.05,               # Max 5% risk on high confluence
+    "base_risk_pct": 0.10,              # Base 10% risk
+    "max_risk_pct": 0.25,               # Max 25% risk on high confluence
     "confluence_tiers": {
         # confidence_range: risk_multiplier
         80: 1.0,    # 80-85 confidence → 1x base risk (2%)
@@ -266,7 +266,7 @@ MIN_PROFIT_THRESHOLD_PCT = 0.12  # 0.12% minimum profit after all fees
 TRADE_MANAGER_CONFIG = {
     'enable_auto_execution': os.getenv("AUTO_EXECUTION", "false").lower() == "true",
     'enable_trailing_stop': True,
-    'max_risk_per_trade': float(os.getenv("MAX_RISK_PER_TRADE", "0.02")),  # 2%
+    'max_risk_per_trade': float(os.getenv("MAX_RISK_PER_TRADE", "0.10")),  # 10%
     'max_positions': int(os.getenv("MAX_POSITIONS", "10")),  # Increased to 10
     'max_daily_loss': float(os.getenv("MAX_DAILY_LOSS", "0.50")),  # 50% daily loss limit (raised for testing)
     'max_drawdown': float(os.getenv("MAX_DRAWDOWN", "0.70")),  # 70% max drawdown (from peak)
