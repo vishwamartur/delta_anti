@@ -12,17 +12,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Tuple
-from enum import Enum
+
+from analysis.market_analyzer import MarketRegime
 
 logger = logging.getLogger(__name__)
-
-
-class MarketRegime(Enum):
-    """Market regime classification."""
-    TRENDING_UP = "trending_up"
-    TRENDING_DOWN = "trending_down"
-    RANGING = "ranging"          # Low volatility, sideways
-    HIGH_VOLATILITY = "high_vol" # Choppy, avoid trading
 
 
 @dataclass
