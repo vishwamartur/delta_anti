@@ -174,9 +174,9 @@ class LagLlamaPredictor:
                 ckpt_path=self.model_path,
                 prediction_length=self.prediction_length,
                 context_length=self.context_length,
-                num_parallel_samples=self.num_samples,  # renamed from num_samples
+                num_parallel_samples=self.num_samples,
                 batch_size=self.batch_size,
-                nonnegative_pred_samples=True,  # Prices are positive
+                nonnegative_pred_samples=True,
                 **filtered_kwargs
             )
             

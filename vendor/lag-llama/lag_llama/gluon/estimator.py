@@ -162,7 +162,7 @@ class LagLlamaEstimator(PyTorchLightningEstimator):
         validation_sampler: Optional[InstanceSampler] = None,
         time_feat: bool = False,
         dropout: float = 0.0,
-        lags_seq: list = ["M", "W", "D", "H", "T", "S"],
+        lags_seq: list = ["Q", "M", "W", "D", "H", "T", "S"],
         data_id_to_name_map: dict = {},
         use_cosine_annealing_lr: bool = False,
         cosine_annealing_lr_args: dict = {},
@@ -185,9 +185,17 @@ class LagLlamaEstimator(PyTorchLightningEstimator):
 
         lag_indices = []
         for freq in lags_seq:
-            lag_indices.extend(
-                get_lags_for_frequency(freq_str=freq, num_default_lags=1)
-            )
+            try:
+                lag_indices.extend(
+                    get_lags_for_frequency(freq_str=freq, num_default_lags=1)
+                )
+            except ValueError as e:
+                # Handle "Q" frequency manually if GluonTS fails (e.g. version mismatch)
+                # "Q" lags are needed for Lag-Llama checkpoint compatibility
+                if freq == "Q" and "invalid frequency" in str(e):
+                    lag_indices.extend([1, 8, 9, 11, 12, 13])
+                else:
+                    raise e
 
         if len(lag_indices):
             self.lags_seq = sorted(set(lag_indices))
