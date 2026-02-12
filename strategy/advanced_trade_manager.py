@@ -232,7 +232,7 @@ class RiskManager:
     
     def __init__(self, account_balance: float, risk_config: Dict):
         self.account_balance = account_balance
-        self.max_risk_per_trade = risk_config.get('max_risk_per_trade', 0.02)  # 2%
+        self.max_risk_per_trade = risk_config.get('max_risk_per_trade', 0.10)  # 10%
         self.max_positions = risk_config.get('max_positions', 5)
         self.max_daily_loss = risk_config.get('max_daily_loss', 0.05)  # 5%
         self.max_drawdown = risk_config.get('max_drawdown', 0.15)  # 15%
@@ -250,7 +250,7 @@ class RiskManager:
                                symbol: str = "BTCUSD", confidence: int = 0) -> float:
         """
         Calculate position size using DYNAMIC percentage-based risk.
-        Uses RISK_PER_TRADE (2%) of CURRENT balance for safe small account trading.
+        Uses RISK_PER_TRADE (10%) of CURRENT balance for safe small account trading.
         Scales risk based on signal confluence (confidence score).
         Position Size = (Balance × Risk% × Multiplier) / |Entry - Stop Loss|
         """
@@ -263,7 +263,7 @@ class RiskManager:
         
         if use_dynamic:
             # Risk 2% of current balance per trade
-            risk_pct = getattr(config, 'RISK_PER_TRADE', 0.02)
+            risk_pct = getattr(config, 'RISK_PER_TRADE', 0.10)
             risk_amount = self.account_balance * risk_pct
             logger.info(f"[DYNAMIC] Base risk: {risk_pct*100}% of ${self.account_balance:.2f} = ${risk_amount:.2f}")
         else:
