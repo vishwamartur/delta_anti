@@ -215,24 +215,6 @@ class IntegratedTradingSystem:
         if not self.trade_manager.has_open_position(symbol):
             df_htf = self._htf_data.get(symbol)
             
-            # Analyze market condition first (needed for selector)
-            # We need to access the market analyzer instance from signal_generator or create one
-            # The signal_generator has a lazy-loaded one we can use/access
-            market_condition = None
-            if hasattr(signal_generator, 'market_analyzer') and signal_generator.market_analyzer:
-                 market_condition = signal_generator.market_analyzer.analyze_market(symbol, df, ind)
-            
-            # If we can't get condition easily, we might need to instantiate analyzer here 
-            # or rely on the selector to do it.
-            # Actually, let's look at how signal_generator does it.
-            # It calls market_analyzer internally.
-            # The selector needs market_condition as input.
-            
-            # Let's instantiate a local analyzer if needed, or better, 
-            # let's make the selector do the heavy lifting if we pass it the components.
-            # But the selector signature is: select_and_generate(symbol, indicators, market_condition, df, df_htf)
-            
-            # So we MUST get the market_condition first.
             from analysis.market_analyzer import MarketAnalyzer
             if not hasattr(self, '_market_analyzer'):
                 self._market_analyzer = MarketAnalyzer()
@@ -324,24 +306,6 @@ class IntegratedTradingSystem:
         except Exception as e:
             logger.warning(f"[DQN] Reward feedback error: {e}")
 
-    def _record_trade_outcome(self, closed_trade):
-        """Record trade outcome for model accuracy tracking."""
-        if not self.accuracy_tracker:
-            return
-            
-        try:
-            direction = "bullish" if closed_trade.is_long else "bearish"
-            # If PnL > 0, the prediction was correct for that direction
-            # If PnL < 0, the prediction was incorrect
-            # Actually, record_outcome expects the direction that WON.
-            
-            actual_direction = direction if closed_trade.realized_pnl > 0 else ("bearish" if closed_trade.is_long else "bullish")
-            
-            self.accuracy_tracker.record_outcome(closed_trade.trade_id, actual_direction)
-            logger.info(f"[ACCURACY] Recorded outcome for {closed_trade.trade_id}: {actual_direction} (PnL {closed_trade.pnl_percent:.2f}%)")
-            
-        except Exception as e:
-            logger.warning(f"[ACCURACY] Recording error: {e}")
 
     def _record_trade_outcome(self, closed_trade):
         """Record trade outcome for model accuracy tracking."""

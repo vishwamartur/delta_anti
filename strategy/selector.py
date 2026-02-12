@@ -83,14 +83,11 @@ class AdaptiveStrategySelector:
             if regime == MarketRegime.RANGING:
                 if self.range_strategy:
                     logger.info(f"[STRATEGY] {symbol}: Ranging market detected. Switching to Mean Reversion.")
-                    # Using range strategy
-                    range_signal = self.range_strategy.analyze(symbol, df)
+                    range_signal = self.range_strategy.generate_signal(symbol, indicators, indicators.price)
                     if range_signal:
-                        # Convert RangeSignal to TradeSignal if needed, or unify formats
-                        # For now, assuming distinct types, mapping manually:
-                        if range_signal.action in ('BUY', 'LONG'):
+                        if range_signal.direction in ('BUY', 'LONG'):
                             signal_type = SignalType.LONG
-                        elif range_signal.action in ('SELL', 'SHORT'):
+                        elif range_signal.direction in ('SELL', 'SHORT'):
                             signal_type = SignalType.SHORT
                         else:
                             signal_type = SignalType.NEUTRAL
@@ -99,15 +96,19 @@ class AdaptiveStrategySelector:
                             symbol=symbol,
                             signal_type=signal_type,
                             strength=SignalStrength.MODERATE, 
-                            confidence=int(range_signal.confidence * 100),
+                            confidence=int(range_signal.confidence),
                             entry_price=indicators.price,
                             stop_loss=range_signal.stop_loss,
                             take_profit=range_signal.take_profit,
                             timestamp=market_condition.timestamp,
-                            reasons=[f"Range: {r}" for r in range_signal.reasons],
+                            reasons=[f"Range: {range_signal.reason}"],
                             indicators=indicators
                         )
                         strategy_name = "MeanReversion"
+                    else:
+                        logger.info(f"[STRATEGY] {symbol}: Range strategy did not generate a signal. Falling back to Momentum.")
+                        signal = signal_generator.generate_signal(symbol, indicators, df, df_htf)
+                        strategy_name = "Momentum (Fallback)"
                 else:
                     logger.warning(f"[STRATEGY] {symbol}: Ranging detected but Range Strategy not available. Using Momentum.")
                     # Fallback to Momentum

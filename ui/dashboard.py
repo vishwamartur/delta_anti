@@ -278,7 +278,7 @@ class Dashboard:
             for reason in signal.reasons[:5]:  # Show up to 5 reasons
                 if "SMC" in reason or "Liquidity" in reason:
                     content.append(f"  🏦 {reason}\n", style="cyan bold")
-                elif "BLOCKED" in reason or "CONFLICT" in reason:
+                elif "BLOCKED" in reason or "REJECTS" in reason:
                     content.append(f"  ⚠ {reason}\n", style="red")
                 else:
                     content.append(f"  • {reason}\n", style="dim")

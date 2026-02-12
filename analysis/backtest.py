@@ -252,6 +252,7 @@ class Backtester:
         self._generate_report()
 
     def _open_position(self, type_, price, size, sl, tp, timestamp, strategy):
+        from analysis.signals import SignalType
         self.position = size if type_ == SignalType.LONG else -size
         self.entry_price = price
         self.sl_price = sl
@@ -370,7 +371,30 @@ if __name__ == "__main__":
         config.ML_AVAILABLE = False
         config.LAG_LLAMA_AVAILABLE = False
         config.SENTIMENT_AVAILABLE = False
-        logger.info("ML models disabled for backtest.")
+        
+        # Aggressively mock ML modules to prevent heavy imports
+        import sys
+        from unittest.mock import MagicMock
+        
+        # Mock specific ML modules
+        sys.modules['ml'] = MagicMock()
+        sys.modules['ml.models'] = MagicMock()
+        sys.modules['ml.models.lstm_predictor'] = MagicMock()
+        sys.modules['ml.models.lag_llama_predictor'] = MagicMock()
+        sys.modules['ml.sentiment'] = MagicMock()
+        sys.modules['ml.sentiment.market_sentiment'] = MagicMock()
+        
+        # Now import signals - it will use the mocks
+        if 'analysis.signals' in sys.modules:
+            del sys.modules['analysis.signals']
+            
+        import analysis.signals as signals_module
+        signals_module.ML_AVAILABLE = False
+        signals_module.LAG_LLAMA_AVAILABLE = False
+        signals_module.SENTIMENT_AVAILABLE = False
+        signals_module.RANGE_STRATEGY_AVAILABLE = True 
+        
+        logger.info("ML models disabled and mocked for backtest.")
     
     bt = Backtester(args.symbol)
     
